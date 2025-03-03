@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from setup import Setup, SetupManager
 
 class Behavior:
     def __init__(
