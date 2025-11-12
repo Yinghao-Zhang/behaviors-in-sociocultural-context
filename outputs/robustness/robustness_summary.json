@@ -1,0 +1,350 @@
+{
+  "n_configurations": 10,
+  "n_agents_per_config": 50,
+  "configurations": [
+    {
+      "name": "baseline",
+      "description": "Balanced weights, moderate learning (current default)",
+      "w_I_dist": [
+        0.5,
+        0.2
+      ],
+      "w_E_dist": [
+        0.8,
+        0.2
+      ],
+      "w_U_dist": [
+        0.8,
+        0.2
+      ],
+      "alpha_min": 0.1,
+      "alpha_max": 0.3,
+      "receptivity_range": [
+        -0.2,
+        0.9
+      ],
+      "communion_range": [
+        -0.5,
+        0.8
+      ],
+      "presence_salience_range": [
+        0.2,
+        1.0
+      ],
+      "param_variance_multiplier": 1.0
+    },
+    {
+      "name": "habit_dominant",
+      "description": "High habitual tendency, low outcome evaluations",
+      "w_I_dist": [
+        0.9,
+        0.15
+      ],
+      "w_E_dist": [
+        0.4,
+        0.2
+      ],
+      "w_U_dist": [
+        0.4,
+        0.2
+      ],
+      "alpha_min": 0.1,
+      "alpha_max": 0.3,
+      "receptivity_range": [
+        -0.2,
+        0.9
+      ],
+      "communion_range": [
+        -0.5,
+        0.8
+      ],
+      "presence_salience_range": [
+        0.2,
+        1.0
+      ],
+      "param_variance_multiplier": 1.0
+    },
+    {
+      "name": "affective_dominant",
+      "description": "High affective valuation, lower habit and goal",
+      "w_I_dist": [
+        0.3,
+        0.15
+      ],
+      "w_E_dist": [
+        0.95,
+        0.1
+      ],
+      "w_U_dist": [
+        0.5,
+        0.2
+      ],
+      "alpha_min": 0.1,
+      "alpha_max": 0.3,
+      "receptivity_range": [
+        -0.2,
+        0.9
+      ],
+      "communion_range": [
+        -0.5,
+        0.8
+      ],
+      "presence_salience_range": [
+        0.2,
+        1.0
+      ],
+      "param_variance_multiplier": 1.0
+    },
+    {
+      "name": "goal_dominant",
+      "description": "High goal expectancy, lower habit and affective",
+      "w_I_dist": [
+        0.3,
+        0.15
+      ],
+      "w_E_dist": [
+        0.5,
+        0.2
+      ],
+      "w_U_dist": [
+        0.95,
+        0.1
+      ],
+      "alpha_min": 0.1,
+      "alpha_max": 0.3,
+      "receptivity_range": [
+        -0.2,
+        0.9
+      ],
+      "communion_range": [
+        -0.5,
+        0.8
+      ],
+      "presence_salience_range": [
+        0.2,
+        1.0
+      ],
+      "param_variance_multiplier": 1.0
+    },
+    {
+      "name": "fast_learners",
+      "description": "High learning rates across all parameters",
+      "w_I_dist": [
+        0.5,
+        0.2
+      ],
+      "w_E_dist": [
+        0.8,
+        0.2
+      ],
+      "w_U_dist": [
+        0.8,
+        0.2
+      ],
+      "alpha_min": 0.3,
+      "alpha_max": 0.5,
+      "receptivity_range": [
+        -0.2,
+        0.9
+      ],
+      "communion_range": [
+        -0.5,
+        0.8
+      ],
+      "presence_salience_range": [
+        0.2,
+        1.0
+      ],
+      "param_variance_multiplier": 1.0
+    },
+    {
+      "name": "slow_learners",
+      "description": "Low learning rates across all parameters",
+      "w_I_dist": [
+        0.5,
+        0.2
+      ],
+      "w_E_dist": [
+        0.8,
+        0.2
+      ],
+      "w_U_dist": [
+        0.8,
+        0.2
+      ],
+      "alpha_min": 0.03,
+      "alpha_max": 0.12,
+      "receptivity_range": [
+        -0.2,
+        0.9
+      ],
+      "communion_range": [
+        -0.5,
+        0.8
+      ],
+      "presence_salience_range": [
+        0.2,
+        1.0
+      ],
+      "param_variance_multiplier": 1.0
+    },
+    {
+      "name": "high_social_influence",
+      "description": "High receptivity and communion, strong social effects",
+      "w_I_dist": [
+        0.5,
+        0.2
+      ],
+      "w_E_dist": [
+        0.8,
+        0.2
+      ],
+      "w_U_dist": [
+        0.8,
+        0.2
+      ],
+      "alpha_min": 0.1,
+      "alpha_max": 0.3,
+      "receptivity_range": [
+        0.3,
+        0.9
+      ],
+      "communion_range": [
+        0.2,
+        0.8
+      ],
+      "presence_salience_range": [
+        0.6,
+        1.0
+      ],
+      "param_variance_multiplier": 1.0
+    },
+    {
+      "name": "low_social_influence",
+      "description": "Low receptivity and communion, weak social effects",
+      "w_I_dist": [
+        0.5,
+        0.2
+      ],
+      "w_E_dist": [
+        0.8,
+        0.2
+      ],
+      "w_U_dist": [
+        0.8,
+        0.2
+      ],
+      "alpha_min": 0.1,
+      "alpha_max": 0.3,
+      "receptivity_range": [
+        -0.5,
+        0.2
+      ],
+      "communion_range": [
+        -0.5,
+        0.0
+      ],
+      "presence_salience_range": [
+        0.1,
+        0.4
+      ],
+      "param_variance_multiplier": 1.0
+    },
+    {
+      "name": "heterogeneous",
+      "description": "High variance in all parameters (diverse population)",
+      "w_I_dist": [
+        0.5,
+        0.3
+      ],
+      "w_E_dist": [
+        0.8,
+        0.3
+      ],
+      "w_U_dist": [
+        0.8,
+        0.3
+      ],
+      "alpha_min": 0.05,
+      "alpha_max": 0.4,
+      "receptivity_range": [
+        -0.2,
+        0.9
+      ],
+      "communion_range": [
+        -0.5,
+        0.8
+      ],
+      "presence_salience_range": [
+        0.2,
+        1.0
+      ],
+      "param_variance_multiplier": 1.5
+    },
+    {
+      "name": "homogeneous",
+      "description": "Low variance in all parameters (similar population)",
+      "w_I_dist": [
+        0.5,
+        0.1
+      ],
+      "w_E_dist": [
+        0.8,
+        0.1
+      ],
+      "w_U_dist": [
+        0.8,
+        0.1
+      ],
+      "alpha_min": 0.15,
+      "alpha_max": 0.25,
+      "receptivity_range": [
+        -0.2,
+        0.9
+      ],
+      "communion_range": [
+        -0.5,
+        0.8
+      ],
+      "presence_salience_range": [
+        0.2,
+        1.0
+      ],
+      "param_variance_multiplier": 0.5
+    }
+  ],
+  "summary_statistics": {
+    "accuracy": {
+      "null": {
+        "mean": 0.9277498325252316,
+        "std": 0.05483505906787158,
+        "min": 0.8235294117647058,
+        "max": 0.991304347826087
+      },
+      "logreg": {
+        "mean": 0.9277498325252316,
+        "std": 0.05483505906787158,
+        "min": 0.8235294117647058,
+        "max": 0.991304347826087
+      },
+      "no_learning": {
+        "mean": 0.9277498325252316,
+        "std": 0.05483505906787158,
+        "min": 0.8235294117647058,
+        "max": 0.991304347826087
+      },
+      "full": {
+        "mean": 0.9285628406553128,
+        "std": 0.0540712436810653,
+        "min": 0.8235294117647058,
+        "max": 0.991304347826087
+      }
+    },
+    "learning_gain_pct": {
+      "mean": 0.09259259259259309,
+      "std": 0.29280348705262926,
+      "min": 0.0,
+      "max": 0.9259259259259309
+    }
+  }
+}

@@ -1,0 +1,32 @@
+
+======================================================================
+ROBUSTNESS VALIDATION ACROSS 10 PARAMETER CONFIGURATIONS
+======================================================================
+
+
+######################################################################
+Configuration 1/10: baseline
+Description: Balanced weights, moderate learning (current default)
+######################################################################
+
+Generating simulation data...
+Generated 692 events for 50 people
+
+======================================================================
+Configuration: baseline
+======================================================================
+Train: 40 people, Test: 10 people
+
+Fitting models on training data...
+
+Evaluating on test data...
+Traceback (most recent call last):
+  File "/Users/yinghaozhang/Documents/research/Culture/behaviors-in-sociocultural-context/experiments/robustness_validation.py", line 695, in <module>
+    main()
+  File "/Users/yinghaozhang/Documents/research/Culture/behaviors-in-sociocultural-context/experiments/robustness_validation.py", line 607, in main
+    results = run_validation_for_config(
+  File "/Users/yinghaozhang/Documents/research/Culture/behaviors-in-sociocultural-context/experiments/robustness_validation.py", line 428, in run_validation_for_config
+    probs_no_learn = predict_computational_model(pop_params_no_learn, person_data, tau=tau)
+  File "/Users/yinghaozhang/Documents/research/Culture/behaviors-in-sociocultural-context/experiments/validate_predictions_between_person.py", line 230, in predict_computational_model
+    params["aI_pos"], params["aI_neg"], 
+KeyError: 'aI_pos'
