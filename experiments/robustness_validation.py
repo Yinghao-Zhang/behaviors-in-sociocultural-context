@@ -185,20 +185,36 @@ def generate_simulation_data(config: ParameterConfiguration, seed: int,
         people_df: Person-level data
     """
     # Define behaviors (same across all configs)
+    # Realistic tradeoff structure:
+    # - AVOID: Easy (low difficulty), slightly unpleasant but tolerable, doesn't solve problems
+    #   * difficulty=0.2 → e_out ≈ base - 0.05, u_out ≈ base - 0.03
+    #   * base=0.0 → e_out ≈ -0.05, u_out ≈ -0.03 (slightly negative)
+    # - APPROACH: Hard (high difficulty), uncomfortable, but better outcomes if successful
+    #   * difficulty=0.7 → e_out ≈ base - 0.175, u_out ≈ base - 0.105  
+    #   * base=0.3 → e_out ≈ 0.125, u_out ≈ 0.195 (positive, especially utility)
+    # Realistic behavioral tradeoff in personality pathology:
+    # - avoid_conflict: Comfortable in moment (low difficulty → higher enjoyment)
+    #                   but poor relationship/resolution utility
+    # - approach_conflict_care: Uncomfortable (high difficulty → lower enjoyment)
+    #                          but better relationship/resolution utility
+    #
+    # With e_out = base - 0.25*difficulty, u_out = base - 0.15*difficulty:
+    # avoid:    e ≈ 0.275, u ≈ 0.285 (feels better, but avoidance harms relationships)
+    # approach: e ≈ 0.1,   u ≈ 0.38  (feels worse, but resolution helps relationships)
     behaviors = [
         BehaviorCfg(
             key="avoid_conflict",
             label="Avoid social conflict",
-            difficulty=0.6,
-            base_outcome=-0.2,
-            outcome_volatility=0.25
+            difficulty=0.1,              # Easy/comfortable (e_out ≈ 0.275)
+            base_outcome=0.3,            # Good immediate feeling (u_out ≈ 0.285)
+            outcome_volatility=0.10      # Low variability (predictable relief)
         ),
         BehaviorCfg(
             key="approach_conflict_care",
             label="Approach conflict with care",
-            difficulty=0.7,
-            base_outcome=0.3,
-            outcome_volatility=0.20
+            difficulty=0.8,              # Hard/uncomfortable (e_out ≈ 0.1)
+            base_outcome=0.5,            # Better long-term utility (u_out ≈ 0.38)
+            outcome_volatility=0.35      # High variability (skill/context-dependent)
         ),
     ]
     
