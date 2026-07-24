@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata from this file."
+title: "Behaviors in Sociocultural Context"
+type: software
+authors:
+  - family-names: "Zhang"
+    given-names: "Yinghao"
+repository-code: "https://github.com/Yinghao-Zhang/behaviors-in-sociocultural-context"
+license: "BSD-3-Clause"

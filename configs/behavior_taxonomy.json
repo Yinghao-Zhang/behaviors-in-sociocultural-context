@@ -1,0 +1,55 @@
+{
+  "domains": {
+    "task_avoidance": {
+      "label": "Task avoidance / productivity",
+      "description": "Delay or disengagement around goal-directed tasks"
+    },
+    "withdrawal": {
+      "label": "Withdrawal / disconnection",
+      "description": "Social disengagement or distancing"
+    },
+    "interpersonal_conflict": {
+      "label": "Interpersonal conflict / accountability / boundaries",
+      "description": "Escalating interpersonal friction or poor boundaries"
+    },
+    "emotional_reactivity": {
+      "label": "Emotional reactivity / impulse",
+      "description": "Rapid, high-intensity, poorly regulated responses"
+    },
+    "rumination_indecision": {
+      "label": "Rumination / indecision / negative mindset",
+      "description": "Repetitive negative thinking or decision paralysis"
+    },
+    "compulsive_bfrb": {
+      "label": "Compulsive / BFRB / anxiety habit",
+      "description": "Repetitive urge-relief routines (e.g., skin picking)"
+    },
+    "reward_relief": {
+      "label": "Reward-relief coping",
+      "description": "Hedonic or relief-seeking coping/escape behaviors"
+    },
+    "health_lifestyle": {
+      "label": "Health / lifestyle dysregulation",
+      "description": "Sleep, diet, or routine dysregulation"
+    },
+    "other": {
+      "label": "Other",
+      "description": "Use only when none of the above fits"
+    }
+  },
+  "motivational_systems": [
+    "affiliation",
+    "agency",
+    "achievement",
+    "threat_safety",
+    "control_certainty",
+    "reward_relief",
+    "body_health"
+  ],
+  "regulatory_directions": [
+    "approach",
+    "avoid",
+    "inhibit",
+    "substitute"
+  ]
+}

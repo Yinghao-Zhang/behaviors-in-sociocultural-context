@@ -1,0 +1,2 @@
+person_id,target_domain,target_motivational_system,target_regulatory_direction,dyadic_relation_similarity,dyadic_relation_ordinal
+EXAMPLE_A1,task_avoidance,achievement,avoid,-0.5,3

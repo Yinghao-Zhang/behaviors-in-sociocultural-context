@@ -1,0 +1,27 @@
+{
+  "max_behaviors": 2,
+  "max_setups": 1,
+  "max_behavior_relations": 1,
+  "max_related_agents": 1,
+  "include_related_agents": false,
+  "related_agents_as_rows": true,
+  "related_agents_learning_enabled": false,
+  "include_related_agent_relationships": false,
+  "include_related_agent_behaviors": false,
+  "include_related_agent_setups": false,
+  "include_learning_rates": true,
+  "include_setup_coords": false,
+  "include_behavior_taxonomy": true,
+  "include_behavior_relations": true,
+  "situation_has_timestamp": true,
+  "situation_has_environment_agent": true,
+  "situation_has_observation": true,
+  "situation_has_suggestions": true,
+  "situation_has_feedback": true,
+  "relation_similarity_map": {
+    "0": 0.0,
+    "1": 0.25,
+    "2": 0.5,
+    "3": -1.0
+  }
+}

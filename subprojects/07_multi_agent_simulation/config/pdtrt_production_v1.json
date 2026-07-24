@@ -1,0 +1,190 @@
+{
+  "status": "frozen",
+  "version": "pdtrt_production_v1",
+  "frozen_date": "2026-07-18",
+  "generator_constants_fingerprint": "9c5f70363c167dba3f88467edb79df9bea7e74e3ef14f88b081076d22deeb088",
+  "design": {
+    "profiles": [
+      "balanced",
+      "rigid_habitual",
+      "relief_reactive",
+      "consequence_sensitive",
+      "socially_contingent"
+    ],
+    "environments": [
+      "repair_supportive",
+      "escalation_prone",
+      "inconsistent_ambiguous"
+    ],
+    "generator_model": "tripartite",
+    "sample_sizes": [30, 60, 100],
+    "mean_events": [10, 25, 50],
+    "missing_rates": [0.0, 0.1, 0.2],
+    "replicates": 20,
+    "base_seed": 20260718,
+    "candidate_models": [
+      "tripartite",
+      "no_learning",
+      "collapsed_reward",
+      "lagged"
+    ]
+  },
+  "estimation": {
+    "primary_estimator": "population",
+    "choice_parameter": "effective_choice_consistency",
+    "latent_value_noise_in_fitted_model": "fixed_near_zero",
+    "fit_max_iter": 120,
+    "production_multistarts": 1,
+    "diagnostic_multistarts": 2,
+    "baseline_reliability": 0.7,
+    "observation_attenuation": 0.5,
+    "held_out_participant_fraction": 0.2,
+    "primary_prediction_metric": "held_out_sequential_log_loss",
+    "person_level_parameter_interpretation": false
+  },
+  "diagnostic_staging": {
+    "production_fit_multistarts": 1,
+    "multistart_validation": "Completed with two starts in three generous Balanced replicates and targeted profile anchors.",
+    "person_level_recovery": "Reported from the preproduction information ladder; not repeated in every factorial cell.",
+    "bidirectional_model_recovery": "Separate targeted benchmark.",
+    "failed_fits": "Retain, count, and report; never silently drop."
+  },
+  "generator_constants": {
+    "enjoyment_means": [
+      [0.45, -0.15],
+      [0.5, -0.45],
+      [0.25, -0.05]
+    ],
+    "enjoyment_sds": [
+      [0.2, 0.24],
+      [0.22, 0.28],
+      [0.38, 0.4]
+    ],
+    "environment_specs": {
+      "escalation_prone": {
+        "context_concentration": 14.0,
+        "context_mean": [0.15, 0.6, 0.25]
+      },
+      "inconsistent_ambiguous": {
+        "context_concentration": 10.0,
+        "context_mean": [0.2, 0.2, 0.6]
+      },
+      "repair_supportive": {
+        "context_concentration": 14.0,
+        "context_mean": [0.6, 0.15, 0.25]
+      }
+    },
+    "profile_specs": {
+      "balanced": {
+        "alpha_e": [0.1, 0.3],
+        "alpha_i_neg": [0.1, 0.3],
+        "alpha_i_pos": [0.1, 0.3],
+        "alpha_u": [0.1, 0.3],
+        "receptivity_bias": [-0.15, 0.3],
+        "social_kappa": [0.25, 1.25],
+        "weight_concentration": 24.0,
+        "weight_mean": [
+          0.3333333333333333,
+          0.3333333333333333,
+          0.3333333333333333
+        ]
+      },
+      "consequence_sensitive": {
+        "alpha_e": [0.05, 0.18],
+        "alpha_i_neg": [0.1, 0.3],
+        "alpha_i_pos": [0.1, 0.3],
+        "alpha_u": [0.3, 0.5],
+        "receptivity_bias": [-0.1, 0.3],
+        "social_kappa": [0.2, 1.2],
+        "weight_concentration": 28.0,
+        "weight_mean": [0.175, 0.175, 0.65]
+      },
+      "relief_reactive": {
+        "alpha_e": [0.3, 0.5],
+        "alpha_i_neg": [0.1, 0.3],
+        "alpha_i_pos": [0.1, 0.3],
+        "alpha_u": [0.05, 0.18],
+        "receptivity_bias": [-0.1, 0.3],
+        "social_kappa": [0.2, 1.2],
+        "weight_concentration": 28.0,
+        "weight_mean": [0.175, 0.65, 0.175]
+      },
+      "rigid_habitual": {
+        "alpha_e": [0.03, 0.12],
+        "alpha_i_neg": [0.03, 0.12],
+        "alpha_i_pos": [0.3, 0.5],
+        "alpha_u": [0.03, 0.12],
+        "receptivity_bias": [-0.15, 0.25],
+        "social_kappa": [0.2, 1.1],
+        "weight_concentration": 28.0,
+        "weight_mean": [0.65, 0.175, 0.175]
+      },
+      "socially_contingent": {
+        "alpha_e": [0.1, 0.3],
+        "alpha_i_neg": [0.1, 0.3],
+        "alpha_i_pos": [0.1, 0.3],
+        "alpha_u": [0.1, 0.3],
+        "receptivity_bias": [0.2, 0.65],
+        "social_kappa": [0.9, 1.8],
+        "weight_concentration": 24.0,
+        "weight_mean": [
+          0.3333333333333333,
+          0.3333333333333333,
+          0.3333333333333333
+        ]
+      }
+    },
+    "rerun_config_defaults": {
+      "baseline_report_sd": 0.2,
+      "days": 28,
+      "event_dispersion": 3.0,
+      "feedback_report_sd": 0.08,
+      "hidden_events_per_person_day": 0.1,
+      "homophily_scale": 0.55,
+      "initial_prior_alignment": 0.25,
+      "max_focal": 100,
+      "max_tau": 10.0,
+      "mean_degree": 12.0,
+      "min_tau": 0.5,
+      "missing_person_sd": 0.4,
+      "n_social_foci": 12,
+      "network_size": 1000,
+      "observation_attenuation": 0.5,
+      "outcome_relationship_scale": 0.12,
+      "outcome_report_sd": 0.12,
+      "relationship_report_sd": 0.1,
+      "state_sd": 0.35,
+      "suggestion_report_sd": 0.08
+    },
+    "utility_means": [
+      [-0.25, 0.65],
+      [0.35, -0.55],
+      [0.05, 0.1]
+    ],
+    "utility_sds": [
+      [0.28, 0.21],
+      [0.28, 0.34],
+      [0.42, 0.44]
+    ]
+  },
+  "adequacy_thresholds": {
+    "finite_log_loss": true,
+    "optimizer_success_rate_minimum": 0.95,
+    "replicate_pass_fraction_minimum": 0.8,
+    "population_center_mean_absolute_bias_maximum": 0.15,
+    "model_log_loss_improvement_over_prevalence_minimum": 0.01,
+    "tripartite_log_loss_improvement_over_no_learning_minimum": 0.01,
+    "network_mean_degree_range": [9.0, 15.0],
+    "network_largest_component_fraction_minimum": 0.95,
+    "network_mean_clustering_minimum": 0.05,
+    "outcome_boundary_clipping_maximum": 0.05,
+    "one_class_participant_fraction_maximum_in_generous_anchor": 0.25
+  },
+  "runtime_projection": {
+    "workers": 1,
+    "measured_seconds_per_profile_environment_replicate": 375.953651421,
+    "projected_model_fit_hours": 31.33,
+    "projected_total_elapsed_hours": "35-40",
+    "projected_disk_gigabytes": "2.5-3.0"
+  }
+}

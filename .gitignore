@@ -1,0 +1,29 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local Python environments
+.venv/
+.venv_pymc/
+.venv_pymc_clean/
+
+# Local editor/system files
+.vscode/
+
+# Private writing, unreleased projects, and local archives
+/archive/
+/docs/
+/manuscripts/
+/subprojects/*
+!/subprojects/07_multi_agent_simulation/
+/subprojects/07_multi_agent_simulation/archive/
+/subprojects/07_multi_agent_simulation/private/
+
+# Generated project-07 results and scratch files
+/subprojects/07_multi_agent_simulation/outputs*/
+/subprojects/07_multi_agent_simulation/generated/
+*.tmp
+*.log

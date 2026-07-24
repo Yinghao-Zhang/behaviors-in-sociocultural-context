@@ -1,0 +1,3 @@
+situation_id,agent_id,timestamp,interaction_mode,setup_idx,environment_agent_id,environment_agent_type,behavior_1_available,behavior_2_available,behavior_1_suggestion,behavior_2_suggestion,behavior_1_feedback,behavior_2_feedback,chosen_behavior_idx,observed_behavior_idx,observed_agent_id,notes
+EXAMPLE_S1,EXAMPLE_A1,2026-04-01T09:00:00Z,solo,1,,,"1","1",0.2,-0.1,0.0,0.0,1,,,
+EXAMPLE_S2,EXAMPLE_A1,2026-04-01T14:00:00Z,observe,1,EXTERNAL_1,individual,"1","1",0.0,0.0,0.4,0.0,2,1,EXTERNAL_1,observed friend
