@@ -24,6 +24,10 @@ from pdtrt_rerun_fit import (
 
 
 def _find_latent_directory(source_run: Path) -> Path:
+    if (source_run / "config.json").exists():
+        return source_run
+    if (source_run / "latent" / "config.json").exists():
+        return source_run / "latent"
     matches = sorted(source_run.glob("conditions/**/latent/config.json"))
     if len(matches) != 1:
         raise ValueError(
@@ -57,6 +61,7 @@ def run(args: argparse.Namespace) -> int:
         multistarts=args.multistarts,
         variance_update=args.eb_variance_update,
         baseline_reliability=args.baseline_reliability,
+        observer_penalty=simulation.config.observer_penalty,
         seed=args.seed,
     )
 
@@ -74,6 +79,7 @@ def run(args: argparse.Namespace) -> int:
                 "multistarts": cfg.multistarts,
                 "variance_update": cfg.variance_update,
                 "baseline_reliability": cfg.baseline_reliability,
+                "observer_penalty": cfg.observer_penalty,
             },
             "oracle_rule": (
                 "Only the named parameter block is estimated; all other "

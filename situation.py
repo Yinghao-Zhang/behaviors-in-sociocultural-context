@@ -3,6 +3,11 @@ import pandas as pd
 from agent import Agent, Individual, Group, Culture
 from behavior import Behavior
 from setup import Setup, SetupManager
+from social_influence import (
+    integrate_feedback,
+    integrate_suggestion,
+    qualify_social_signal,
+)
 
 class Situation:
     def __init__(self, setup_id, individual_id, environment_id, interaction_mode, behaviors=None):
@@ -68,6 +73,7 @@ class Situation:
         self.choice_probs = None
         self.choice_prob = None
         self.suggestion_terms = None
+        self.feedback_signal = None
         self.perceived_utility = None
         self.perceived_enjoyment = None
         self.learning_behavior = None
@@ -133,6 +139,42 @@ class Situation:
                 params=params,
             )
         return values
+
+    @staticmethod
+    def _center_values(values):
+        """Center behavior values so social signals express relative preference."""
+        if not values:
+            return {}
+        center = float(np.mean(list(values.values())))
+        return {
+            behavior: float(value - center)
+            for behavior, value in values.items()
+        }
+
+    def _relative_utility_feedback(self, evaluator, selected_behavior):
+        """Evaluate a selected behavior relative to the available alternatives."""
+        utility_values = {
+            behavior: evaluator.behaviors[behavior][self.setup]["utility"]
+            for behavior in self.behaviors
+            if behavior in evaluator.behaviors
+            and self.setup in evaluator.behaviors[behavior]
+        }
+        if selected_behavior not in utility_values:
+            return 0.0
+        alternatives = [
+            value
+            for behavior, value in utility_values.items()
+            if behavior != selected_behavior
+        ]
+        reference = float(np.mean(alternatives)) if alternatives else 0.0
+        contrast = float(utility_values[selected_behavior] - reference)
+        strength = float(getattr(evaluator, "feedback_strength", 1.0))
+        noise_scale = max(
+            0.0,
+            float(getattr(evaluator, "feedback_noise_scale", 0.0)),
+        )
+        noise = np.random.normal(0.0, noise_scale) if noise_scale else 0.0
+        return strength * contrast + noise
 
     def _simulate_situation(self, seed=None):
 
@@ -219,7 +261,7 @@ class Situation:
 
         In the tripartite model with multi-agent extension, co-participation involves:
             - Both agents forming choice values (via form_intention) based on their instinct, enjoyment, and utility predictions
-            - Their choice values are blended based on mutual receptivity
+            - Agent B's preferences serving as suggestions to agent A, qualified by agent A's receptivity
             - A behavior is selected using the softmax probabilistic model
             - Both agents experience outcomes and update their parameters with social influence
 
@@ -256,15 +298,18 @@ class Situation:
         choice_values_a = self._choice_values_from_appraisals(agent_a, momentary_a)
         choice_values_b = self._choice_values_from_appraisals(agent_b, momentary_b)
 
-        # Blend choice values based on mutual influence. The social signal is kept
-        # separate from intrapersonal weights and scaled by agent A's social_kappa.
-        social_kappa = getattr(agent_a, 'social_kappa', 1.0)
+        # Agent B's preference serves as a suggestion to agent A.
+        centered_b = self._center_values(choice_values_b)
         blended_values = {}
         for behavior in set(choice_values_a) | set(choice_values_b):
             val_a = choice_values_a.get(behavior, 0)
-            val_b = choice_values_b.get(behavior, 0)
-            raw_social = 0.5 * (receptivity_a * val_b + receptivity_b * val_a)
-            blended_values[behavior] = val_a + social_kappa * raw_social
+            raw_suggestion = centered_b.get(behavior, 0)
+            blended_values[behavior] = integrate_suggestion(
+                val_a,
+                raw_suggestion,
+                receptivity_a,
+                agent_a.kappa_suggestion,
+            )
 
         # Select behavior using the softmax probabilistic model
         # Use agent_a for parameter access, but pass blended values
@@ -277,9 +322,10 @@ class Situation:
         self.choice_prob = self.choice_probs.get(self.selected_behavior)
         self.suggestion_terms = {}
         for behavior in self.behaviors:
-            val_a = choice_values_a.get(behavior, 0)
-            val_b = choice_values_b.get(behavior, 0)
-            self.suggestion_terms[behavior] = 0.5 * (receptivity_a * val_b + receptivity_b * val_a)
+            self.suggestion_terms[behavior] = qualify_social_signal(
+                centered_b.get(behavior, 0),
+                receptivity_a,
+            )
 
         # ===== Phase 4: Utility Outcome Determination =====
         # Simulate outcome (utility)
@@ -304,20 +350,30 @@ class Situation:
         social_enjoyment_a = np.clip(social_enjoyment_a, -1, 1)
         social_enjoyment_b = np.clip(social_enjoyment_b, -1, 1)
 
-        # Apply mutual feedback influence on utility
-        # Get each agent's utility prediction
-        params_a = agent_a.behaviors[self.selected_behavior][self.setup]
-        params_b = agent_b.behaviors[self.selected_behavior][self.setup]
-        utility_prediction_a = params_a['utility']
-        utility_prediction_b = params_b['utility']
+        # Each agent evaluates the selected behavior relative to alternatives.
+        feedback_a_to_b = self._relative_utility_feedback(
+            agent_a, self.selected_behavior
+        )
+        feedback_b_to_a = self._relative_utility_feedback(
+            agent_b, self.selected_behavior
+        )
+        self.feedback_signal = {
+            "agent_a_to_b": feedback_a_to_b,
+            "agent_b_to_a": feedback_b_to_a,
+        }
 
-        # Calculate feedback components
-        feedback_a_to_b = base_utility - utility_prediction_a  # A's feedback to B
-        feedback_b_to_a = base_utility - utility_prediction_b  # B's feedback to A
-
-        # Apply receptivity to feedback
-        social_utility_a = base_utility + feedback_b_to_a * receptivity_a
-        social_utility_b = base_utility + feedback_a_to_b * receptivity_b
+        social_utility_a = integrate_feedback(
+            base_utility,
+            feedback_b_to_a,
+            receptivity_a,
+            agent_a.kappa_feedback,
+        )
+        social_utility_b = integrate_feedback(
+            base_utility,
+            feedback_a_to_b,
+            receptivity_b,
+            agent_b.kappa_feedback,
+        )
 
         # Ensure values stay within valid range
         social_utility_a = np.clip(social_utility_a, -1, 1)
@@ -429,16 +485,24 @@ class Situation:
             else:
                 observer_momentary, _ = self._sample_momentary_appraisals(observer)
             observer_values = self._choice_values_from_appraisals(observer, observer_momentary)
+            centered_observer_values = self._center_values(observer_values)
 
-            # Calculate suggestion signal for each behavior
-            social_kappa = getattr(active_agent, 'social_kappa', 1.0)
+            # Calculate and integrate the relationship-qualified suggestion.
             blended_values = {}
             for behavior in set(active_values) | set(observer_values):
                 base_val = active_values.get(behavior, 0)
-                raw_suggestion = receptivity * observer_values.get(behavior, 0)
-                blended_values[behavior] = base_val + social_kappa * raw_suggestion
+                raw_suggestion = centered_observer_values.get(behavior, 0)
+                blended_values[behavior] = integrate_suggestion(
+                    base_val,
+                    raw_suggestion,
+                    receptivity,
+                    active_agent.kappa_suggestion,
+                )
             for behavior in self.behaviors:
-                self.suggestion_terms[behavior] = receptivity * observer_values.get(behavior, 0)
+                self.suggestion_terms[behavior] = qualify_social_signal(
+                    centered_observer_values.get(behavior, 0),
+                    receptivity,
+                )
         else:
             blended_values = active_values
 
@@ -473,23 +537,19 @@ class Situation:
 
         # Apply social feedback effect on utility if enabled
         if observer_feedback:
-            # Get observer's utility prediction for this behavior
-            observer_params = observer.behaviors[self.selected_behavior][self.setup]
-            observer_utility_prediction = observer_params['utility']
-
-            # Calculate rational feedback component: U_A - utility_{O,B,S}
-            rational_feedback = base_utility - observer_utility_prediction
-
-            # Apply mood/disposition factor (simplified to 0 for now)
-            mood_factor = 0
-
-            # Calculate total feedback: (U_A - utility_{O,B,S}) + M_O
-            feedback = rational_feedback + mood_factor
-
-            # Apply receptivity to feedback
-            social_utility = base_utility + feedback * receptivity
+            feedback = self._relative_utility_feedback(
+                observer, self.selected_behavior
+            )
+            self.feedback_signal = feedback
+            social_utility = integrate_feedback(
+                base_utility,
+                feedback,
+                receptivity,
+                active_agent.kappa_feedback,
+            )
             social_utility = np.clip(social_utility, -1, 1)
         else:
+            self.feedback_signal = 0.0
             social_utility = base_utility
 
         self.perceived_enjoyment = social_enjoyment

@@ -107,6 +107,26 @@ def _build_command(
         str(constants["suggestion_report_sd"]),
         "--feedback-report-sd",
         str(constants["feedback_report_sd"]),
+        "--initial-prior-alignment",
+        str(constants["initial_prior_alignment"]),
+        "--instinct-state-sd",
+        str(constants["instinct_state_sd"]),
+        "--state-sd",
+        str(constants["state_sd"]),
+        "--feedback-strength",
+        str(constants["feedback_strength"]),
+        "--feedback-noise-sd",
+        str(constants["feedback_noise_sd"]),
+        "--outcome-relationship-scale",
+        str(constants["outcome_relationship_scale"]),
+        "--observer-penalty",
+        str(constants["observer_penalty"]),
+        "--missing-person-sd",
+        str(constants["missing_person_sd"]),
+        "--min-tau",
+        str(constants["min_tau"]),
+        "--max-tau",
+        str(constants["max_tau"]),
         "--baseline-reliability",
         str(estimation["baseline_reliability"]),
         "--fit-max-iter",
@@ -136,7 +156,7 @@ def main() -> int:
         default=str(
             Path(__file__).resolve().parents[1]
             / "config"
-            / "pdtrt_production_v1.json"
+            / "pdtrt_production_v2.json"
         ),
     )
     parser.add_argument("--max-parent-conditions", type=int)

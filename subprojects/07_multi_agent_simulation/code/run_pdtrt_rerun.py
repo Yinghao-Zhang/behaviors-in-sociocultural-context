@@ -473,6 +473,16 @@ def _run_generation_stage(
             relationship_report_sd=args.relationship_report_sd,
             suggestion_report_sd=args.suggestion_report_sd,
             feedback_report_sd=args.feedback_report_sd,
+            initial_prior_alignment=args.initial_prior_alignment,
+            instinct_state_sd=args.instinct_state_sd,
+            state_sd=args.state_sd,
+            feedback_strength=args.feedback_strength,
+            feedback_noise_sd=args.feedback_noise_sd,
+            outcome_relationship_scale=args.outcome_relationship_scale,
+            observer_penalty=args.observer_penalty,
+            missing_person_sd=args.missing_person_sd,
+            min_tau=args.min_tau,
+            max_tau=args.max_tau,
             pilot_version=args.pilot_version,
         )
         parent = _parent_directory(
@@ -636,6 +646,7 @@ def _fit_parent_task(task: Mapping[str, object]) -> Dict[str, object]:
             multistarts=int(task["multistarts"]),
             variance_update=str(task["eb_variance_update"]),
             baseline_reliability=float(task["baseline_reliability"]),
+            observer_penalty=float(task["observer_penalty"]),
             seed=stable_seed(
                 base_seed,
                 "fit",
@@ -779,6 +790,16 @@ def _run_fit_stage(
             relationship_report_sd=args.relationship_report_sd,
             suggestion_report_sd=args.suggestion_report_sd,
             feedback_report_sd=args.feedback_report_sd,
+            initial_prior_alignment=args.initial_prior_alignment,
+            instinct_state_sd=args.instinct_state_sd,
+            state_sd=args.state_sd,
+            feedback_strength=args.feedback_strength,
+            feedback_noise_sd=args.feedback_noise_sd,
+            outcome_relationship_scale=args.outcome_relationship_scale,
+            observer_penalty=args.observer_penalty,
+            missing_person_sd=args.missing_person_sd,
+            min_tau=args.min_tau,
+            max_tau=args.max_tau,
             pilot_version=args.pilot_version,
         )
         parent = _parent_directory(
@@ -804,6 +825,7 @@ def _run_fit_stage(
                 "multistarts": args.multistarts,
                 "eb_variance_update": args.eb_variance_update,
                 "baseline_reliability": args.baseline_reliability,
+                "observer_penalty": args.observer_penalty,
                 "resume": args.resume,
                 "continue_on_error": args.continue_on_error,
                 "parent_meta": {
@@ -969,6 +991,20 @@ def run(args: argparse.Namespace) -> int:
             "feedback_report_sd": args.feedback_report_sd,
             "baseline_reliability": args.baseline_reliability,
         },
+        "generator": {
+            "initial_prior_alignment": args.initial_prior_alignment,
+            "instinct_state_sd": args.instinct_state_sd,
+            "state_sd": args.state_sd,
+            "feedback_strength": args.feedback_strength,
+            "feedback_noise_sd": args.feedback_noise_sd,
+            "outcome_relationship_scale": (
+                args.outcome_relationship_scale
+            ),
+            "observer_penalty": args.observer_penalty,
+            "missing_person_sd": args.missing_person_sd,
+            "min_tau": args.min_tau,
+            "max_tau": args.max_tau,
+        },
         "empirical_bayes": {
             "iterations": args.eb_iterations,
             "max_iter": args.fit_max_iter,
@@ -1075,6 +1111,18 @@ def run(args: argparse.Namespace) -> int:
                         relationship_report_sd=args.relationship_report_sd,
                         suggestion_report_sd=args.suggestion_report_sd,
                         feedback_report_sd=args.feedback_report_sd,
+                        initial_prior_alignment=args.initial_prior_alignment,
+                        instinct_state_sd=args.instinct_state_sd,
+                        state_sd=args.state_sd,
+                        feedback_strength=args.feedback_strength,
+                        feedback_noise_sd=args.feedback_noise_sd,
+                        outcome_relationship_scale=(
+                            args.outcome_relationship_scale
+                        ),
+                        observer_penalty=args.observer_penalty,
+                        missing_person_sd=args.missing_person_sd,
+                        min_tau=args.min_tau,
+                        max_tau=args.max_tau,
                         pilot_version=args.pilot_version,
                     )
                     parent_meta = {
@@ -1165,6 +1213,7 @@ def run(args: argparse.Namespace) -> int:
                             multistarts=args.multistarts,
                             variance_update=args.eb_variance_update,
                             baseline_reliability=args.baseline_reliability,
+                            observer_penalty=args.observer_penalty,
                             seed=stable_seed(
                                 args.seed,
                                 "fit",
@@ -1308,6 +1357,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--relationship-report-sd", type=float, default=0.10)
     parser.add_argument("--suggestion-report-sd", type=float, default=0.08)
     parser.add_argument("--feedback-report-sd", type=float, default=0.08)
+    parser.add_argument("--initial-prior-alignment", type=float, default=0.25)
+    parser.add_argument("--instinct-state-sd", type=float, default=0.20)
+    parser.add_argument("--state-sd", type=float, default=0.35)
+    parser.add_argument("--feedback-strength", type=float, default=0.35)
+    parser.add_argument("--feedback-noise-sd", type=float, default=0.08)
+    parser.add_argument(
+        "--outcome-relationship-scale",
+        type=float,
+        default=0.12,
+    )
+    parser.add_argument("--observer-penalty", type=float, default=0.50)
+    parser.add_argument("--missing-person-sd", type=float, default=0.40)
+    parser.add_argument("--min-tau", type=float, default=0.50)
+    parser.add_argument("--max-tau", type=float, default=10.0)
     parser.add_argument("--baseline-reliability", type=float, default=0.70)
     parser.add_argument("--eb-iterations", type=int, default=3)
     parser.add_argument(

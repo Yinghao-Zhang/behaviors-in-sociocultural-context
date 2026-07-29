@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
 from pathlib import Path
+import sys
 from typing import Dict, Iterable, List, Mapping, Sequence, Tuple
 
 import numpy as np
@@ -11,11 +12,18 @@ import pandas as pd
 from scipy.special import expit, logit, softmax
 
 
-CONTEXTS: Tuple[str, ...] = (
-    "repair_opportunity",
-    "escalation_risk",
-    "ambiguous_conflict",
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+from social_influence import (
+    integrate_feedback,
+    integrate_suggestion,
+    observational_learning_gain,
+    qualify_social_signal,
 )
+
+
 BEHAVIORS: Tuple[str, ...] = ("avoid", "approach")
 STATE_NAMES: Tuple[str, ...] = ("instinct", "enjoyment", "utility")
 PROFILE_NAMES: Tuple[str, ...] = (
@@ -26,9 +34,9 @@ PROFILE_NAMES: Tuple[str, ...] = (
     "socially_contingent",
 )
 ENVIRONMENT_NAMES: Tuple[str, ...] = (
-    "repair_supportive",
-    "escalation_prone",
-    "inconsistent_ambiguous",
+    "approach_oriented",
+    "avoidance_oriented",
+    "mixed",
 )
 GENERATOR_MODELS: Tuple[str, ...] = (
     "tripartite",
@@ -46,7 +54,8 @@ PROFILE_SPECS: Dict[str, Dict[str, object]] = {
         "alpha_i_neg": (0.10, 0.30),
         "alpha_e": (0.10, 0.30),
         "alpha_u": (0.10, 0.30),
-        "social_kappa": (0.25, 1.25),
+        "kappa_suggestion": (0.20, 0.55),
+        "kappa_feedback": (0.20, 0.55),
         "receptivity_bias": (-0.15, 0.30),
     },
     "rigid_habitual": {
@@ -56,7 +65,8 @@ PROFILE_SPECS: Dict[str, Dict[str, object]] = {
         "alpha_i_neg": (0.03, 0.12),
         "alpha_e": (0.03, 0.12),
         "alpha_u": (0.03, 0.12),
-        "social_kappa": (0.20, 1.10),
+        "kappa_suggestion": (0.15, 0.45),
+        "kappa_feedback": (0.15, 0.45),
         "receptivity_bias": (-0.15, 0.25),
     },
     "relief_reactive": {
@@ -66,7 +76,8 @@ PROFILE_SPECS: Dict[str, Dict[str, object]] = {
         "alpha_i_neg": (0.10, 0.30),
         "alpha_e": (0.30, 0.50),
         "alpha_u": (0.05, 0.18),
-        "social_kappa": (0.20, 1.20),
+        "kappa_suggestion": (0.15, 0.50),
+        "kappa_feedback": (0.15, 0.50),
         "receptivity_bias": (-0.10, 0.30),
     },
     "consequence_sensitive": {
@@ -76,7 +87,8 @@ PROFILE_SPECS: Dict[str, Dict[str, object]] = {
         "alpha_i_neg": (0.10, 0.30),
         "alpha_e": (0.05, 0.18),
         "alpha_u": (0.30, 0.50),
-        "social_kappa": (0.20, 1.20),
+        "kappa_suggestion": (0.15, 0.50),
+        "kappa_feedback": (0.20, 0.60),
         "receptivity_bias": (-0.10, 0.30),
     },
     "socially_contingent": {
@@ -86,68 +98,51 @@ PROFILE_SPECS: Dict[str, Dict[str, object]] = {
         "alpha_i_neg": (0.10, 0.30),
         "alpha_e": (0.10, 0.30),
         "alpha_u": (0.10, 0.30),
-        "social_kappa": (0.90, 1.80),
+        "kappa_suggestion": (0.60, 0.90),
+        "kappa_feedback": (0.60, 0.90),
         "receptivity_bias": (0.20, 0.65),
     },
 }
 
 
 ENVIRONMENT_SPECS: Dict[str, Dict[str, object]] = {
-    "repair_supportive": {
-        "context_mean": (0.60, 0.15, 0.25),
-        "context_concentration": 14.0,
+    "approach_oriented": {
+        "state_contrast_mean": {
+            "instinct": 0.20,
+            "enjoyment": 0.10,
+            "utility": 0.55,
+        },
     },
-    "escalation_prone": {
-        "context_mean": (0.15, 0.60, 0.25),
-        "context_concentration": 14.0,
+    "avoidance_oriented": {
+        "state_contrast_mean": {
+            "instinct": -0.20,
+            "enjoyment": -0.10,
+            "utility": -0.55,
+        },
     },
-    "inconsistent_ambiguous": {
-        "context_mean": (0.20, 0.20, 0.60),
-        "context_concentration": 10.0,
+    "mixed": {
+        "state_contrast_mean": {
+            "instinct": 0.0,
+            "enjoyment": 0.0,
+            "utility": 0.0,
+        },
     },
 }
 
 
-# Rows are contexts and columns are avoid/approach. Immediate experience and
-# instrumental outcome are deliberately distinct.
-ENJOYMENT_MEANS = np.array(
-    [
-        [0.45, -0.15],
-        [0.50, -0.45],
-        [0.25, -0.05],
-    ],
-    dtype=float,
-)
-UTILITY_MEANS = np.array(
-    [
-        [-0.25, 0.65],
-        [0.35, -0.55],
-        [0.05, 0.10],
-    ],
-    dtype=float,
-)
-ENJOYMENT_SDS = np.array(
-    [
-        [0.20, 0.24],
-        [0.22, 0.28],
-        [0.38, 0.40],
-    ],
-    dtype=float,
-)
-UTILITY_SDS = np.array(
-    [
-        [0.28, 0.21],
-        [0.28, 0.34],
-        [0.42, 0.44],
-    ],
-    dtype=float,
-)
+# Columns are avoid/approach. Avoidance is typically more immediately
+# relieving, whereas approach is typically more useful for addressing conflict.
+# These direct outcomes are held constant across social environments.
+ENJOYMENT_MEANS = np.array([0.35, -0.20], dtype=float)
+UTILITY_MEANS = np.array([-0.10, 0.25], dtype=float)
+ENJOYMENT_SDS = np.array([0.28, 0.30], dtype=float)
+UTILITY_SDS = np.array([0.30, 0.30], dtype=float)
 
 
 @dataclass(frozen=True)
 class RerunConfig:
     profile: str = "balanced"
-    environment: str = "repair_supportive"
+    environment: str = "approach_oriented"
     generator_model: str = "tripartite"
     seed: int = 20260718
     days: int = 28
@@ -165,9 +160,12 @@ class RerunConfig:
     suggestion_report_sd: float = 0.08
     feedback_report_sd: float = 0.08
     initial_prior_alignment: float = 0.25
+    instinct_state_sd: float = 0.20
     state_sd: float = 0.35
+    feedback_strength: float = 0.35
+    feedback_noise_sd: float = 0.08
     outcome_relationship_scale: float = 0.12
-    observation_attenuation: float = 0.50
+    observer_penalty: float = 0.50
     missing_person_sd: float = 0.40
     min_tau: float = 0.5
     max_tau: float = 10.0
@@ -188,6 +186,11 @@ class RerunConfig:
             raise ValueError("mean_events must be nonnegative")
         if self.event_dispersion <= 0:
             raise ValueError("event_dispersion must be positive")
+        if self.instinct_state_sd < 0 or self.state_sd < 0:
+            raise ValueError("state standard deviations must be nonnegative")
+        if self.feedback_strength < 0 or self.feedback_noise_sd < 0:
+            raise ValueError("feedback strength and noise must be nonnegative")
+        observational_learning_gain(self.observer_penalty)
 
 
 @dataclass
@@ -224,7 +227,6 @@ def simulator_seed_manifest(base_seed: int) -> Dict[str, int]:
         name: stable_seed(base_seed, label)
         for name, label in (
             ("network", "network"),
-            ("environment", "environment"),
             ("focal_sample", "focal"),
             ("background_parameters", "background_parameters"),
             ("focal_profile_parameters", "focal_profile_parameters"),
@@ -306,7 +308,16 @@ def _sample_profile_parameters(
         "alpha_i_neg": _sample_uniform(rng, spec["alpha_i_neg"], n),
         "alpha_e": _sample_uniform(rng, spec["alpha_e"], n),
         "alpha_u": _sample_uniform(rng, spec["alpha_u"], n),
-        "social_kappa": _sample_uniform(rng, spec["social_kappa"], n),
+        "kappa_suggestion": _sample_uniform(
+            rng,
+            spec["kappa_suggestion"],
+            n,
+        ),
+        "kappa_feedback": _sample_uniform(
+            rng,
+            spec["kappa_feedback"],
+            n,
+        ),
         "receptivity_bias": _sample_uniform(rng, spec["receptivity_bias"], n),
         "tau": tau,
         "noise_s": noise,
@@ -338,7 +349,8 @@ def _sample_paired_focal_parameters(
         "alpha_i_neg",
         "alpha_e",
         "alpha_u",
-        "social_kappa",
+        "kappa_suggestion",
+        "kappa_feedback",
         "receptivity_bias",
     ):
         field_rng = np.random.default_rng(
@@ -375,7 +387,8 @@ def _sample_background_parameters(
         "alpha_i_neg",
         "alpha_e",
         "alpha_u",
-        "social_kappa",
+        "kappa_suggestion",
+        "kappa_feedback",
         "receptivity_bias",
         "tau",
         "noise_s",
@@ -411,9 +424,6 @@ class PDTRTRerunSimulator:
     def __init__(self, config: RerunConfig):
         self.config = config
         self.rng_network = np.random.default_rng(stable_seed(config.seed, "network"))
-        self.rng_environment = np.random.default_rng(
-            stable_seed(config.seed, "environment")
-        )
         self.rng_focal = np.random.default_rng(stable_seed(config.seed, "focal"))
         self.rng_background = np.random.default_rng(
             stable_seed(config.seed, "background_parameters")
@@ -515,18 +525,11 @@ class PDTRTRerunSimulator:
                             * self.popularity[j],
                         )
                     )
-                    env = ENVIRONMENT_SPECS[cfg.environment]
-                    mean = np.asarray(env["context_mean"], dtype=float)
-                    concentration = float(env["context_concentration"])
-                    context_probs = self.rng_environment.dirichlet(
-                        np.maximum(0.05, mean * concentration)
-                    )
                     self.relationships[(i, j)] = {
                         "distance": distance,
                         "warmth": warmth,
                         "receptivity": receptivity,
                         "strength": strength,
-                        "context_probs": context_probs,
                         "enjoyment_offset": float(rng.normal(0.0, 0.08)),
                         "utility_offset": float(rng.normal(0.0, 0.10)),
                     }
@@ -674,10 +677,6 @@ class PDTRTRerunSimulator:
     def _relationship_table(self) -> pd.DataFrame:
         rows = []
         for (source, target), relationship in sorted(self.relationships.items()):
-            context_probs = np.asarray(
-                relationship["context_probs"],
-                dtype=float,
-            )
             rows.append(
                 {
                     "source": source,
@@ -686,9 +685,6 @@ class PDTRTRerunSimulator:
                     "warmth": float(relationship["warmth"]),
                     "receptivity": float(relationship["receptivity"]),
                     "strength": float(relationship["strength"]),
-                    "context_prob_repair_opportunity": float(context_probs[0]),
-                    "context_prob_escalation_risk": float(context_probs[1]),
-                    "context_prob_ambiguous_conflict": float(context_probs[2]),
                     "enjoyment_offset": float(relationship["enjoyment_offset"]),
                     "utility_offset": float(relationship["utility_offset"]),
                 }
@@ -721,27 +717,45 @@ class PDTRTRerunSimulator:
         self.parameters = params
         self.background_assignments = assignments
 
-        initial_target = np.stack([ENJOYMENT_MEANS, UTILITY_MEANS], axis=-1)
-        state = np.empty((n, len(CONTEXTS), len(BEHAVIORS), len(STATE_NAMES)), dtype=float)
-        state[..., 0] = self.rng_states.normal(
-            0.0,
-            0.20,
-            size=(n, len(CONTEXTS), len(BEHAVIORS)),
+        environment_contrasts = ENVIRONMENT_SPECS[cfg.environment][
+            "state_contrast_mean"
+        ]
+        environment_means = np.empty(
+            (len(BEHAVIORS), len(STATE_NAMES)),
+            dtype=float,
+        )
+        for state_idx, state_name in enumerate(STATE_NAMES):
+            contrast = float(environment_contrasts[state_name])
+            environment_means[:, state_idx] = (-0.5 * contrast, 0.5 * contrast)
+
+        state = np.empty(
+            (n, len(BEHAVIORS), len(STATE_NAMES)),
+            dtype=float,
+        )
+        state[..., 0] = (
+            environment_means[None, :, 0]
+            + self.rng_states.normal(
+                0.0,
+                cfg.instinct_state_sd,
+                size=(n, len(BEHAVIORS)),
+            )
         )
         state[..., 1] = (
-            cfg.initial_prior_alignment * initial_target[None, :, :, 0]
+            environment_means[None, :, 1]
+            + cfg.initial_prior_alignment * ENJOYMENT_MEANS[None, :]
             + self.rng_states.normal(
                 0.0,
                 cfg.state_sd,
-                size=(n, len(CONTEXTS), len(BEHAVIORS)),
+                size=(n, len(BEHAVIORS)),
             )
         )
         state[..., 2] = (
-            cfg.initial_prior_alignment * initial_target[None, :, :, 1]
+            environment_means[None, :, 2]
+            + cfg.initial_prior_alignment * UTILITY_MEANS[None, :]
             + self.rng_states.normal(
                 0.0,
                 cfg.state_sd,
-                size=(n, len(CONTEXTS), len(BEHAVIORS)),
+                size=(n, len(BEHAVIORS)),
             )
         )
         self.states = _safe_clip_state(state)
@@ -782,12 +796,11 @@ class PDTRTRerunSimulator:
         self,
         actor: int,
         partner: int,
-        context_idx: int,
         suggestion_active: bool,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        state = self.states[actor, context_idx]
+        state = self.states[actor]
         rel = self._relationship(actor, partner)
-        partner_state = self.states[partner, context_idx]
+        partner_state = self.states[partner]
         partner_weights = np.array(
             [
                 self.parameters["w_i"][partner],
@@ -796,25 +809,21 @@ class PDTRTRerunSimulator:
             ]
         )
         partner_values = partner_state @ partner_weights
-        suggestion = np.zeros(len(BEHAVIORS), dtype=float)
+        raw_suggestion = np.zeros(len(BEHAVIORS), dtype=float)
         if suggestion_active:
-            suggestion = float(rel["receptivity"]) * (partner_values - np.mean(partner_values))
+            raw_suggestion = partner_values - np.mean(partner_values)
 
         if self.config.generator_model == "collapsed_reward":
             w_i = self.parameters["w_i"][actor]
             reward = 0.5 * (state[:, 1] + state[:, 2])
             values = w_i * state[:, 0] + (1.0 - w_i) * reward
         elif self.config.generator_model == "lagged":
-            context_effect = np.array([-0.75, 0.75, 0.0], dtype=float)[context_idx]
             delta = (
-                context_effect
-                + 1.00 * (self.last_choice[actor] - 0.5)
+                1.00 * (self.last_choice[actor] - 0.5)
                 + 0.45 * self.last_utility[actor]
                 - 0.20 * self.last_enjoyment[actor]
-                + self.parameters["social_kappa"][actor] * (suggestion[1] - suggestion[0])
             )
             values = np.array([-0.5 * delta, 0.5 * delta], dtype=float)
-            suggestion = np.zeros(len(BEHAVIORS), dtype=float)
         else:
             weights = np.array(
                 [
@@ -825,9 +834,15 @@ class PDTRTRerunSimulator:
             )
             values = state @ weights
 
-        values = values + self.parameters["social_kappa"][actor] * suggestion
+        values = integrate_suggestion(
+            values,
+            raw_suggestion,
+            float(rel["receptivity"]),
+            float(self.parameters["kappa_suggestion"][actor]),
+            suggestion_present=suggestion_active,
+        )
         values = values + self.rng_events.normal(0.0, self.parameters["noise_s"][actor], size=2)
-        return values, suggestion
+        return values, raw_suggestion
 
     def _select_behavior(self, actor: int, values: np.ndarray) -> Tuple[int, float]:
         tau = self.parameters["tau"][actor]
@@ -839,48 +854,72 @@ class PDTRTRerunSimulator:
         self,
         actor: int,
         partner: int,
-        context_idx: int,
         behavior_idx: int,
         feedback_active: bool,
     ) -> Dict[str, float]:
         rel = self._relationship(actor, partner)
         raw_e = (
-            ENJOYMENT_MEANS[context_idx, behavior_idx]
+            ENJOYMENT_MEANS[behavior_idx]
             + float(rel["enjoyment_offset"])
             + self.config.outcome_relationship_scale * float(rel["warmth"])
-            + self.rng_outcomes.normal(0.0, ENJOYMENT_SDS[context_idx, behavior_idx])
+            + self.rng_outcomes.normal(0.0, ENJOYMENT_SDS[behavior_idx])
         )
         raw_u = (
-            UTILITY_MEANS[context_idx, behavior_idx]
+            UTILITY_MEANS[behavior_idx]
             + float(rel["utility_offset"])
             + 0.5 * self.config.outcome_relationship_scale * float(rel["warmth"])
-            + self.rng_outcomes.normal(0.0, UTILITY_SDS[context_idx, behavior_idx])
+            + self.rng_outcomes.normal(0.0, UTILITY_SDS[behavior_idx])
         )
-        actor_expected_u = self.states[actor, context_idx, behavior_idx, 2]
-        partner_expected_u = self.states[partner, context_idx, behavior_idx, 2]
-        feedback = 0.0
+        other_idx = 1 - behavior_idx
+        partner_utility_contrast = float(
+            self.states[partner, behavior_idx, 2]
+            - self.states[partner, other_idx, 2]
+        )
+        feedback_signal = 0.0
         if feedback_active:
-            feedback = float(rel["receptivity"]) * 0.20 * (partner_expected_u - actor_expected_u)
+            feedback_signal = (
+                self.config.feedback_strength * partner_utility_contrast
+                + self.rng_outcomes.normal(0.0, self.config.feedback_noise_sd)
+            )
         perceived_e = float(np.clip(raw_e, -1.0, 1.0))
-        perceived_u = float(np.clip(raw_u + feedback, -1.0, 1.0))
+        qualified_feedback = float(
+            qualify_social_signal(
+                feedback_signal,
+                float(rel["receptivity"]),
+            )
+        )
+        perceived_u = float(
+            np.clip(
+                integrate_feedback(
+                    raw_u,
+                    feedback_signal,
+                    float(rel["receptivity"]),
+                    float(self.parameters["kappa_feedback"][actor]),
+                    feedback_present=feedback_active,
+                ),
+                -1.0,
+                1.0,
+            )
+        )
         return {
             "raw_enjoyment": float(np.clip(raw_e, -1.0, 1.0)),
             "raw_utility": float(np.clip(raw_u, -1.0, 1.0)),
             "perceived_enjoyment": perceived_e,
             "perceived_utility": perceived_u,
-            "feedback": feedback,
+            "partner_utility_contrast": partner_utility_contrast,
+            "feedback_signal": feedback_signal,
+            "qualified_feedback": qualified_feedback,
         }
 
     def _update_tripartite(
         self,
         learner: int,
-        context_idx: int,
         behavior_idx: int,
         enjoyment: float,
         utility: float,
         gain: float,
     ) -> None:
-        state = self.states[learner, context_idx]
+        state = self.states[learner]
         chosen = behavior_idx
         other = 1 - behavior_idx
         state[chosen, 0] += (
@@ -903,19 +942,18 @@ class PDTRTRerunSimulator:
             * self.parameters["alpha_u"][learner]
             * (utility - state[chosen, 2])
         )
-        self.states[learner, context_idx] = _safe_clip_state(state)
+        self.states[learner] = _safe_clip_state(state)
 
     def _update_collapsed(
         self,
         learner: int,
-        context_idx: int,
         behavior_idx: int,
         enjoyment: float,
         utility: float,
         gain: float,
     ) -> None:
         reward = 0.5 * (enjoyment + utility)
-        state = self.states[learner, context_idx]
+        state = self.states[learner]
         chosen = behavior_idx
         other = 1 - behavior_idx
         state[chosen, 0] += (
@@ -933,40 +971,49 @@ class PDTRTRerunSimulator:
         )
         for state_idx in (1, 2):
             state[chosen, state_idx] += gain * alpha_r * (reward - state[chosen, state_idx])
-        self.states[learner, context_idx] = _safe_clip_state(state)
+        self.states[learner] = _safe_clip_state(state)
 
     def _apply_learning(
         self,
         actor: int,
         observer: int,
-        context_idx: int,
         behavior_idx: int,
         outcome: Mapping[str, float],
     ) -> None:
         model = self.config.generator_model
         if model == "no_learning":
             return
+        observer_rel = self._relationship(observer, actor)
+        observer_enjoyment = float(
+            qualify_social_signal(
+                float(outcome["raw_enjoyment"]),
+                float(observer_rel["receptivity"]),
+            )
+        )
+        observer_utility = float(
+            qualify_social_signal(
+                float(outcome["raw_utility"]),
+                float(observer_rel["receptivity"]),
+            )
+        )
         if model == "lagged":
             self.last_choice[actor] = float(behavior_idx)
             self.last_enjoyment[actor] = float(outcome["perceived_enjoyment"])
             self.last_utility[actor] = float(outcome["perceived_utility"])
             self.last_choice[observer] = float(behavior_idx)
-            self.last_enjoyment[observer] = float(outcome["raw_enjoyment"])
-            self.last_utility[observer] = float(outcome["raw_utility"])
+            self.last_enjoyment[observer] = observer_enjoyment
+            self.last_utility[observer] = observer_utility
             return
 
-        observer_rel = self._relationship(observer, actor)
-        observer_gain = self.config.observation_attenuation * (
-            0.5 + 0.5 * float(observer_rel["receptivity"])
+        observer_gain = observational_learning_gain(
+            self.config.observer_penalty
         )
-        observer_gain = float(np.clip(observer_gain, 0.0, self.config.observation_attenuation))
         if model == "collapsed_reward":
             update = self._update_collapsed
         else:
             update = self._update_tripartite
         update(
             actor,
-            context_idx,
             behavior_idx,
             float(outcome["perceived_enjoyment"]),
             float(outcome["perceived_utility"]),
@@ -974,10 +1021,9 @@ class PDTRTRerunSimulator:
         )
         update(
             observer,
-            context_idx,
             behavior_idx,
-            float(outcome["raw_enjoyment"]),
-            float(outcome["raw_utility"]),
+            observer_enjoyment,
+            observer_utility,
             observer_gain,
         )
 
@@ -1006,27 +1052,35 @@ class PDTRTRerunSimulator:
                 partner = observer
                 report_role = "observe"
 
-        rel = self._relationship(actor, partner)
-        context_idx = int(self.rng_events.choice(len(CONTEXTS), p=np.asarray(rel["context_probs"], dtype=float)))
-        suggestion_active = bool(self.rng_events.random() < self.suggestion_probability[actor])
+        suggestion_active = bool(
+            self.rng_events.random() < self.suggestion_probability[partner]
+        )
         feedback_active = bool(self.rng_events.random() < self.feedback_probability[partner])
 
         focal_pre = None
         if focal_network_id is not None:
-            focal_pre = self.states[focal_network_id, context_idx].copy()
-        values, suggestion = self._choice_values(actor, partner, context_idx, suggestion_active)
+            focal_pre = self.states[focal_network_id].copy()
+        values, raw_suggestion = self._choice_values(
+            actor,
+            partner,
+            suggestion_active,
+        )
         behavior_idx, approach_probability = self._select_behavior(actor, values)
         outcome = self._generate_outcome(
             actor,
             partner,
-            context_idx,
             behavior_idx,
             feedback_active,
         )
-        self._apply_learning(actor, observer, context_idx, behavior_idx, outcome)
+        self._apply_learning(actor, observer, behavior_idx, outcome)
         focal_post = None
         if focal_network_id is not None:
-            focal_post = self.states[focal_network_id, context_idx].copy()
+            focal_post = self.states[focal_network_id].copy()
+        actor_rel = self._relationship(actor, partner)
+        qualified_suggestion = qualify_social_signal(
+            raw_suggestion,
+            float(actor_rel["receptivity"]),
+        )
 
         truth_row: Dict[str, object] = {
             "event_id": event_id,
@@ -1036,15 +1090,19 @@ class PDTRTRerunSimulator:
             "actor_network_id": actor,
             "observer_network_id": observer,
             "partner_network_id": partner,
-            "context_idx": context_idx,
-            "context": CONTEXTS[context_idx],
             "behavior_idx": behavior_idx,
             "behavior": BEHAVIORS[behavior_idx],
             "approach_probability_true": approach_probability,
             "suggestion_active": int(suggestion_active),
             "feedback_active": int(feedback_active),
-            "suggestion_avoid_true": float(suggestion[0]),
-            "suggestion_approach_true": float(suggestion[1]),
+            "suggestion_avoid_true": float(raw_suggestion[0]),
+            "suggestion_approach_true": float(raw_suggestion[1]),
+            "qualified_suggestion_avoid_true": float(
+                qualified_suggestion[0]
+            ),
+            "qualified_suggestion_approach_true": float(
+                qualified_suggestion[1]
+            ),
             **outcome,
         }
         if focal_pre is not None and focal_post is not None:
@@ -1058,16 +1116,20 @@ class PDTRTRerunSimulator:
 
         focal_rel = self._relationship(focal_network_id, actor if report_role == "observe" else partner)
         if report_role == "self":
-            focal_e = float(outcome["perceived_enjoyment"])
-            focal_u = float(outcome["perceived_utility"])
-            suggestion_report = suggestion.copy()
-            feedback_value = float(outcome["feedback"])
+            focal_e = float(outcome["raw_enjoyment"])
+            focal_u = float(outcome["raw_utility"])
+            suggestion_report = raw_suggestion.copy()
+            feedback_value = float(outcome["feedback_signal"])
+            reported_suggestion_active = suggestion_active
+            reported_feedback_active = feedback_active
             choice_behavior = behavior_idx
         else:
             focal_e = float(outcome["raw_enjoyment"])
             focal_u = float(outcome["raw_utility"])
             suggestion_report = np.zeros(2, dtype=float)
             feedback_value = 0.0
+            reported_suggestion_active = False
+            reported_feedback_active = False
             choice_behavior = np.nan
 
         miss_u = float(self.rng_missing.random())
@@ -1077,22 +1139,44 @@ class PDTRTRerunSimulator:
             "focal_network_id": focal_network_id,
             "timestamp_day": timestamp,
             "role": report_role,
-            "context_idx": context_idx,
-            "context": CONTEXTS[context_idx],
             "partner_id": actor if report_role == "observe" else partner,
             "behavior_idx": behavior_idx,
             "behavior": BEHAVIORS[behavior_idx],
             "choice_behavior": choice_behavior,
+            "suggestion_active": int(reported_suggestion_active),
+            "feedback_active": int(reported_feedback_active),
             "suggestion_avoid": float(
                 suggestion_report[0]
-                + self.rng_reports.normal(0.0, self.config.suggestion_report_sd)
+                + (
+                    self.rng_reports.normal(
+                        0.0,
+                        self.config.suggestion_report_sd,
+                    )
+                    if reported_suggestion_active
+                    else 0.0
+                )
             ),
             "suggestion_approach": float(
                 suggestion_report[1]
-                + self.rng_reports.normal(0.0, self.config.suggestion_report_sd)
+                + (
+                    self.rng_reports.normal(
+                        0.0,
+                        self.config.suggestion_report_sd,
+                    )
+                    if reported_suggestion_active
+                    else 0.0
+                )
             ),
             "feedback": float(
-                feedback_value + self.rng_reports.normal(0.0, self.config.feedback_report_sd)
+                feedback_value
+                + (
+                    self.rng_reports.normal(
+                        0.0,
+                        self.config.feedback_report_sd,
+                    )
+                    if reported_feedback_active
+                    else 0.0
+                )
             ),
             "enjoyment_out": float(
                 np.clip(
@@ -1164,20 +1248,24 @@ class PDTRTRerunSimulator:
                 "split": split,
                 "profile": self.config.profile,
             }
-            for context_idx, context in enumerate(CONTEXTS):
-                for behavior_idx, behavior in enumerate(BEHAVIORS):
-                    for state_idx, state_name in enumerate(STATE_NAMES):
-                        true_value = float(baseline_truth[focal_id, context_idx, behavior_idx, state_idx])
-                        reported_value = float(
-                            np.clip(
-                                true_value
-                                + self.rng_reports.normal(0.0, self.config.baseline_report_sd),
-                                -1.0,
-                                1.0,
-                            )
+            for behavior_idx, behavior in enumerate(BEHAVIORS):
+                for state_idx, state_name in enumerate(STATE_NAMES):
+                    true_value = float(
+                        baseline_truth[focal_id, behavior_idx, state_idx]
+                    )
+                    reported_value = float(
+                        np.clip(
+                            true_value
+                            + self.rng_reports.normal(
+                                0.0,
+                                self.config.baseline_report_sd,
+                            ),
+                            -1.0,
+                            1.0,
                         )
-                        true_row[f"initial_{state_name}_{context}_{behavior}"] = true_value
-                        observed_row[f"baseline_{state_name}_{context}_{behavior}"] = reported_value
+                    )
+                    true_row[f"initial_{state_name}_{behavior}"] = true_value
+                    observed_row[f"baseline_{state_name}_{behavior}"] = reported_value
             truth_rows.append(true_row)
             observed_rows.append(observed_row)
         return pd.DataFrame(truth_rows), pd.DataFrame(observed_rows)
@@ -1230,11 +1318,6 @@ class PDTRTRerunSimulator:
         people_truth, people_observed = self._people_tables(baseline_truth)
 
         choice_reports = complete_reports.loc[complete_reports["role"] == "self"] if not complete_reports.empty else complete_reports
-        context_props = (
-            complete_reports["context"].value_counts(normalize=True).to_dict()
-            if not complete_reports.empty
-            else {}
-        )
         generation_diagnostics: Dict[str, float] = {
             "eligible_event_mean": float(np.mean(counts)),
             "eligible_event_sd": float(np.std(counts, ddof=1)) if len(counts) > 1 else 0.0,
@@ -1248,7 +1331,82 @@ class PDTRTRerunSimulator:
             "common_eval_count": float(complete_reports["eval_common"].sum()) if len(complete_reports) else 0.0,
             "boundary_enjoyment_fraction": float(np.mean(np.abs(truth_events["raw_enjoyment"]) >= 0.999)),
             "boundary_utility_fraction": float(np.mean(np.abs(truth_events["raw_utility"]) >= 0.999)),
+            "boundary_perceived_utility_fraction": float(
+                np.mean(np.abs(truth_events["perceived_utility"]) >= 0.999)
+            ),
         }
+        for state_idx, state_name in enumerate(STATE_NAMES):
+            generation_diagnostics[
+                f"initial_{state_name}_approach_minus_avoid"
+            ] = float(
+                np.mean(
+                    baseline_truth[:, 1, state_idx]
+                    - baseline_truth[:, 0, state_idx]
+                )
+            )
+        suggestion_events = truth_events.loc[
+            truth_events["suggestion_active"] == 1
+        ]
+        feedback_events = truth_events.loc[
+            truth_events["feedback_active"] == 1
+        ]
+        generation_diagnostics[
+            "suggestion_approach_minus_avoid"
+        ] = (
+            float(
+                np.mean(
+                    suggestion_events["suggestion_approach_true"]
+                    - suggestion_events["suggestion_avoid_true"]
+                )
+            )
+            if len(suggestion_events)
+            else np.nan
+        )
+        generation_diagnostics[
+            "qualified_suggestion_approach_minus_avoid"
+        ] = (
+            float(
+                np.mean(
+                    suggestion_events[
+                        "qualified_suggestion_approach_true"
+                    ]
+                    - suggestion_events[
+                        "qualified_suggestion_avoid_true"
+                    ]
+                )
+            )
+            if len(suggestion_events)
+            else np.nan
+        )
+        if len(feedback_events):
+            approach_direction = np.where(
+                feedback_events["behavior_idx"].to_numpy(dtype=int) == 1,
+                1.0,
+                -1.0,
+            )
+            generation_diagnostics[
+                "feedback_approach_preference"
+            ] = float(
+                np.mean(
+                    feedback_events["feedback_signal"].to_numpy(dtype=float)
+                    * approach_direction
+                )
+            )
+            generation_diagnostics[
+                "received_feedback_approach_preference"
+            ] = float(
+                np.mean(
+                    feedback_events["qualified_feedback"].to_numpy(
+                        dtype=float
+                    )
+                    * approach_direction
+                )
+            )
+        else:
+            generation_diagnostics["feedback_approach_preference"] = np.nan
+            generation_diagnostics[
+                "received_feedback_approach_preference"
+            ] = np.nan
         if not complete_reports.empty:
             report_counts = complete_reports.groupby("focal_id").size()
             partner_counts = complete_reports.groupby(
@@ -1258,9 +1416,6 @@ class PDTRTRerunSimulator:
             max_partner_share = partner_shares.groupby(level=0).max()
             partner_coverage = complete_reports.groupby("focal_id")[
                 "partner_id"
-            ].nunique()
-            context_coverage = complete_reports.groupby("focal_id")[
-                "context"
             ].nunique()
             elapsed = complete_reports["elapsed_since_prior_report"].dropna()
             for quantile in (0.10, 0.25, 0.50, 0.75, 0.90):
@@ -1294,13 +1449,10 @@ class PDTRTRerunSimulator:
                         np.mean(np.abs(complete_reports["feedback"]) > 0.05)
                     ),
                     "mean_partner_coverage": float(partner_coverage.mean()),
-                    "mean_context_coverage": float(context_coverage.mean()),
                     "mean_max_partner_event_share": float(max_partner_share.mean()),
                     "report_count_sd": float(report_counts.std(ddof=1)),
                 }
             )
-        for context in CONTEXTS:
-            generation_diagnostics[f"context_prop_{context}"] = float(context_props.get(context, 0.0))
 
         return SimulationResult(
             config=self.config,

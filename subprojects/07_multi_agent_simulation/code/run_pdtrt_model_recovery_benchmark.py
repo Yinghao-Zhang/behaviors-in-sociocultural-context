@@ -241,7 +241,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scenarios", default=DEFAULT_SCENARIOS)
     parser.add_argument("--generator-models", default=",".join(GENERATOR_MODELS))
     parser.add_argument("--profile", default="balanced")
-    parser.add_argument("--environment", default="inconsistent_ambiguous")
+    parser.add_argument("--environment", default="mixed")
     parser.add_argument("--reps", type=int, default=20)
     parser.add_argument("--seed", type=int, default=20260718)
     parser.add_argument("--days", type=int, default=28)

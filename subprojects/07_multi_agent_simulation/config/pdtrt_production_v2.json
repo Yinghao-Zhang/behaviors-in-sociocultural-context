@@ -1,0 +1,348 @@
+{
+  "adequacy_thresholds": {
+    "choice_consistency_log_error_maximum": 0.22314355131420976,
+    "mean_ece_maximum": 0.1,
+    "optimizer_success_rate_minimum": 0.8,
+    "relative_log_loss_skill_minimum": 0.05,
+    "replicate_ece_maximum": 0.15,
+    "replicate_pass_fraction_minimum": 0.8,
+    "unit_interval_class_error_maximum": 0.1
+  },
+  "design": {
+    "base_seed": 20260718,
+    "candidate_models": [
+      "tripartite",
+      "no_learning",
+      "collapsed_reward",
+      "lagged"
+    ],
+    "environments": [
+      "approach_oriented",
+      "avoidance_oriented",
+      "mixed"
+    ],
+    "generator_model": "tripartite",
+    "mean_events": [
+      10,
+      25,
+      50
+    ],
+    "missing_rates": [
+      0.0,
+      0.1,
+      0.2
+    ],
+    "profiles": [
+      "balanced",
+      "rigid_habitual",
+      "relief_reactive",
+      "consequence_sensitive",
+      "socially_contingent"
+    ],
+    "replicates": 20,
+    "sample_sizes": [
+      30,
+      60,
+      100
+    ]
+  },
+  "diagnostic_staging": {
+    "bidirectional_model_recovery": "Separate supplemental benchmark using each candidate model as a data generator.",
+    "conditional_recovery": "Parameter blocks fitted with all remaining person parameters fixed to their generating values.",
+    "failed_fits": "Retain, count, and report; never silently drop.",
+    "multistart_validation": "Two starts in three balanced generous-information replicates and six phenotype-targeted replicates."
+  },
+  "estimation": {
+    "baseline_reliability": 0.7,
+    "choice_parameter": "effective_choice_consistency",
+    "diagnostic_multistarts": 2,
+    "fit_max_iter": 120,
+    "held_out_participant_fraction": 0.2,
+    "latent_value_noise_in_fitted_model": "fixed_near_zero",
+    "observer_penalty": 0.5,
+    "person_level_parameter_interpretation": false,
+    "primary_estimator": "population",
+    "primary_prediction_metric": "held_out_sequential_log_loss",
+    "production_multistarts": 1
+  },
+  "frozen_date": "2026-07-26",
+  "generator_constants": {
+    "enjoyment_means": [
+      0.35,
+      -0.2
+    ],
+    "enjoyment_sds": [
+      0.28,
+      0.3
+    ],
+    "environment_specs": {
+      "approach_oriented": {
+        "state_contrast_mean": {
+          "enjoyment": 0.1,
+          "instinct": 0.2,
+          "utility": 0.55
+        }
+      },
+      "avoidance_oriented": {
+        "state_contrast_mean": {
+          "enjoyment": -0.1,
+          "instinct": -0.2,
+          "utility": -0.55
+        }
+      },
+      "mixed": {
+        "state_contrast_mean": {
+          "enjoyment": 0.0,
+          "instinct": 0.0,
+          "utility": 0.0
+        }
+      }
+    },
+    "profile_specs": {
+      "balanced": {
+        "alpha_e": [
+          0.1,
+          0.3
+        ],
+        "alpha_i_neg": [
+          0.1,
+          0.3
+        ],
+        "alpha_i_pos": [
+          0.1,
+          0.3
+        ],
+        "alpha_u": [
+          0.1,
+          0.3
+        ],
+        "kappa_feedback": [
+          0.2,
+          0.55
+        ],
+        "kappa_suggestion": [
+          0.2,
+          0.55
+        ],
+        "receptivity_bias": [
+          -0.15,
+          0.3
+        ],
+        "weight_concentration": 24.0,
+        "weight_mean": [
+          0.3333333333333333,
+          0.3333333333333333,
+          0.3333333333333333
+        ]
+      },
+      "consequence_sensitive": {
+        "alpha_e": [
+          0.05,
+          0.18
+        ],
+        "alpha_i_neg": [
+          0.1,
+          0.3
+        ],
+        "alpha_i_pos": [
+          0.1,
+          0.3
+        ],
+        "alpha_u": [
+          0.3,
+          0.5
+        ],
+        "kappa_feedback": [
+          0.2,
+          0.6
+        ],
+        "kappa_suggestion": [
+          0.15,
+          0.5
+        ],
+        "receptivity_bias": [
+          -0.1,
+          0.3
+        ],
+        "weight_concentration": 28.0,
+        "weight_mean": [
+          0.175,
+          0.175,
+          0.65
+        ]
+      },
+      "relief_reactive": {
+        "alpha_e": [
+          0.3,
+          0.5
+        ],
+        "alpha_i_neg": [
+          0.1,
+          0.3
+        ],
+        "alpha_i_pos": [
+          0.1,
+          0.3
+        ],
+        "alpha_u": [
+          0.05,
+          0.18
+        ],
+        "kappa_feedback": [
+          0.15,
+          0.5
+        ],
+        "kappa_suggestion": [
+          0.15,
+          0.5
+        ],
+        "receptivity_bias": [
+          -0.1,
+          0.3
+        ],
+        "weight_concentration": 28.0,
+        "weight_mean": [
+          0.175,
+          0.65,
+          0.175
+        ]
+      },
+      "rigid_habitual": {
+        "alpha_e": [
+          0.03,
+          0.12
+        ],
+        "alpha_i_neg": [
+          0.03,
+          0.12
+        ],
+        "alpha_i_pos": [
+          0.3,
+          0.5
+        ],
+        "alpha_u": [
+          0.03,
+          0.12
+        ],
+        "kappa_feedback": [
+          0.15,
+          0.45
+        ],
+        "kappa_suggestion": [
+          0.15,
+          0.45
+        ],
+        "receptivity_bias": [
+          -0.15,
+          0.25
+        ],
+        "weight_concentration": 28.0,
+        "weight_mean": [
+          0.65,
+          0.175,
+          0.175
+        ]
+      },
+      "socially_contingent": {
+        "alpha_e": [
+          0.1,
+          0.3
+        ],
+        "alpha_i_neg": [
+          0.1,
+          0.3
+        ],
+        "alpha_i_pos": [
+          0.1,
+          0.3
+        ],
+        "alpha_u": [
+          0.1,
+          0.3
+        ],
+        "kappa_feedback": [
+          0.6,
+          0.9
+        ],
+        "kappa_suggestion": [
+          0.6,
+          0.9
+        ],
+        "receptivity_bias": [
+          0.2,
+          0.65
+        ],
+        "weight_concentration": 24.0,
+        "weight_mean": [
+          0.3333333333333333,
+          0.3333333333333333,
+          0.3333333333333333
+        ]
+      }
+    },
+    "rerun_config_defaults": {
+      "baseline_report_sd": 0.2,
+      "days": 28,
+      "event_dispersion": 3.0,
+      "feedback_noise_sd": 0.08,
+      "feedback_report_sd": 0.08,
+      "feedback_strength": 0.35,
+      "hidden_events_per_person_day": 0.1,
+      "homophily_scale": 0.55,
+      "initial_prior_alignment": 0.25,
+      "instinct_state_sd": 0.2,
+      "max_focal": 100,
+      "max_tau": 10.0,
+      "mean_degree": 12.0,
+      "min_tau": 0.5,
+      "missing_person_sd": 0.4,
+      "n_social_foci": 12,
+      "network_size": 1000,
+      "observer_penalty": 0.5,
+      "outcome_relationship_scale": 0.12,
+      "outcome_report_sd": 0.12,
+      "relationship_report_sd": 0.1,
+      "state_sd": 0.35,
+      "suggestion_report_sd": 0.08
+    },
+    "utility_means": [
+      -0.1,
+      0.25
+    ],
+    "utility_sds": [
+      0.3,
+      0.3
+    ]
+  },
+  "generator_constants_fingerprint": "bfee7c103ed542d8825ab71edfdb78a680c6221b8ffea40c53590c5e596d0529",
+  "preproduction_findings": {
+    "generator_and_analysis_gates": "passed",
+    "generous_population_recovery": {
+      "choice_consistency": "passed",
+      "decision_weights": "partial",
+      "full_vector": "not_recovered",
+      "learning_rates": "passed",
+      "social_integration": "not_recovered"
+    },
+    "generous_prediction_criterion": "passed",
+    "interpretation": "Shared-parameter accuracy remains an empirical outcome of the factorial design. Failure to recover the full vector is retained as an interpretability boundary rather than removed by changing thresholds."
+  },
+  "runtime_projection": {
+    "measured_parent_fit_seconds_by_mean_events": {
+      "10": 49.021443,
+      "25": 100.389588,
+      "50": 236.870454
+    },
+    "measured_parent_generation_seconds_by_mean_events": {
+      "10": 1.240285,
+      "25": 1.538882,
+      "50": 1.937527
+    },
+    "projected_disk_gigabytes": "2.2-2.8",
+    "projected_elapsed_hours_with_overhead": "35-40",
+    "projected_recorded_cpu_hours": 32.58,
+    "workers": 1
+  },
+  "status": "frozen",
+  "version": "pdtrt_production_v2"
+}

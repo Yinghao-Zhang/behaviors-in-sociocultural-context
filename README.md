@@ -15,6 +15,10 @@ simulation workflow developed in project 07.
 - `setup.py`: situational-context definitions and context management.
 - `situation.py`: behavioral selection, direct and observational learning,
   suggestions, feedback, and social interaction modes.
+- `social_influence.py`: shared equations that qualify suggestion and feedback
+  by relationship receptivity and blend them with personal intention or direct
+  utility using separate person-level weights, plus the observer-penalty
+  conversion used for observational learning.
 - `behavior_taxonomy.py`, `behavior_features.py`, and `behavior_priors.py`:
   optional behavior metadata, feature encoding, and prior specification.
 - `hyperparameter_tuning.py`: reusable hyperparameter-search utilities.

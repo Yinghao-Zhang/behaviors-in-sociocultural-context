@@ -1,5 +1,6 @@
 {
-  "status": "frozen",
+  "status": "superseded",
+  "superseded_reason": "The version 1 generator treated three conflict contingency categories as independent learning settings. The revised design uses one conflict setting and population-level social-environment priors.",
   "version": "pdtrt_production_v1",
   "frozen_date": "2026-07-18",
   "generator_constants_fingerprint": "9c5f70363c167dba3f88467edb79df9bea7e74e3ef14f88b081076d22deeb088",

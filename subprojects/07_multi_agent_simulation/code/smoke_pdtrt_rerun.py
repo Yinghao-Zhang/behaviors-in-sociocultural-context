@@ -32,7 +32,7 @@ def _run_smoke(outdir: Path) -> None:
         "--profiles",
         "relief_reactive",
         "--environments",
-        "inconsistent_ambiguous",
+        "mixed",
         "--event-means",
         "12",
         "--sample-sizes",
@@ -73,7 +73,7 @@ def _condition_root(outdir: Path) -> Path:
         / "conditions"
         / "generator=tripartite"
         / "profile=relief_reactive"
-        / "environment=inconsistent_ambiguous"
+        / "environment=mixed"
         / "events=012"
         / "replicate=001"
     )
@@ -132,6 +132,44 @@ def _validate(outdir: Path) -> Dict[str, object]:
             assert not forbidden_event_columns, forbidden_event_columns
             assert not forbidden_person_columns, forbidden_person_columns
             assert not any("expected_" in column for column in events.columns)
+            assert "context_idx" not in events.columns
+            assert "context" not in events.columns
+            assert {
+                "suggestion_active",
+                "suggestion_avoid",
+                "suggestion_approach",
+                "feedback_active",
+                "feedback",
+                "utility_out",
+                "relationship_receptivity",
+            }.issubset(events.columns)
+            assert (
+                events.loc[
+                    events["suggestion_active"] == 0,
+                    ["suggestion_avoid", "suggestion_approach"],
+                ]
+                .abs()
+                .to_numpy()
+                .max(initial=0.0)
+                == 0.0
+            )
+            assert (
+                events.loc[events["feedback_active"] == 0, "feedback"]
+                .abs()
+                .to_numpy()
+                .max(initial=0.0)
+                == 0.0
+            )
+            baseline_columns = {
+                column
+                for column in people.columns
+                if column.startswith("baseline_")
+            }
+            assert baseline_columns == {
+                f"baseline_{state}_{behavior}"
+                for state in ("instinct", "enjoyment", "utility")
+                for behavior in ("avoid", "approach")
+            }
 
             key = (sample_size, missing)
             event_sets[key] = set(events["event_id"].astype(int))
@@ -161,7 +199,12 @@ def _validate(outdir: Path) -> Dict[str, object]:
                 / "model=tripartite"
                 / "person_parameters.csv.gz"
             )
-            assert {"fit_tau", "fit_noise_s"}.issubset(tripartite_parameters.columns)
+            assert {
+                "fit_tau",
+                "fit_noise_s",
+                "fit_kappa_suggestion",
+                "fit_kappa_feedback",
+            }.issubset(tripartite_parameters.columns)
 
         assert event_sets[(sample_size, 20)].issubset(event_sets[(sample_size, 10)])
         assert event_sets[(sample_size, 10)].issubset(event_sets[(sample_size, 0)])

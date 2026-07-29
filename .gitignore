@@ -17,6 +17,7 @@ __pycache__/
 /archive/
 /docs/
 /manuscripts/
+/scripts/render_pdtrt_supplement.py
 /subprojects/*
 !/subprojects/07_multi_agent_simulation/
 /subprojects/07_multi_agent_simulation/archive/

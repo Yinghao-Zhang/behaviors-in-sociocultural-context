@@ -2,6 +2,7 @@ import numpy as np
 import uuid
 from setup import Setup
 from behavior import Behavior
+from social_influence import observational_learning_gain, qualify_social_signal
 import json
 
 
@@ -87,7 +88,16 @@ class Agent:
         """Retrieve a relationship between two agents."""
         return agent_a.relationships.get(agent_b.id)
 
-    def __init__(self, name="", setups=None, behaviors=None, process_matrix=None, relationships=None):
+    def __init__(
+        self,
+        name="",
+        setups=None,
+        behaviors=None,
+        process_matrix=None,
+        relationships=None,
+        kappa_suggestion=0.5,
+        kappa_feedback=0.5,
+    ):
         """
         Base class for all agents (individuals or groups).
 
@@ -101,6 +111,18 @@ class Agent:
         """
         self.id = str(uuid.uuid4())
         self.name = name
+        # Feedback reflects an evaluator's relative utility for a selected
+        # behavior. Simulations can override these defaults when adding noise.
+        self.feedback_strength = 1.0
+        self.feedback_noise_scale = 0.0
+        self.kappa_suggestion = self._validate_social_weight(
+            kappa_suggestion,
+            "kappa_suggestion",
+        )
+        self.kappa_feedback = self._validate_social_weight(
+            kappa_feedback,
+            "kappa_feedback",
+        )
 
         # Validate and store setups
         self.setups = []
@@ -170,6 +192,13 @@ class Agent:
 
         Agent._debug_log.append(f"Registered: {self.id} ({name})")
         Agent._registry[self.id] = self  # Register the agent
+
+    @staticmethod
+    def _validate_social_weight(value, name):
+        weight = float(value)
+        if not np.isfinite(weight) or not 0 <= weight <= 1:
+            raise ValueError(f"{name} must be finite and in [0, 1].")
+        return weight
 
     def _validate_behavior_params(self, behavior, setup, params):
         """Validate behavior parameters ranges."""
@@ -508,7 +537,11 @@ class Agent:
         else:
             # Observational learning with penalty
             # Reduce learning rate by observer penalty factor
-            delta_instinct = (1 - observer_penalty) * alpha * (target - params['instinct'])
+            delta_instinct = (
+                observational_learning_gain(observer_penalty)
+                * alpha
+                * (target - params['instinct'])
+            )
             params['instinct'] += delta_instinct
 
         # Ensure instinct stays within valid range
@@ -547,7 +580,11 @@ class Agent:
             params['utility'] += alpha_utility * prediction_error
         else:
             # Observational learning with penalty
-            params['utility'] += (1 - observer_penalty) * alpha_utility * prediction_error
+            params['utility'] += (
+                observational_learning_gain(observer_penalty)
+                * alpha_utility
+                * prediction_error
+            )
 
         params['utility'] = np.clip(params['utility'], -1, 1)
 
@@ -595,7 +632,11 @@ class Agent:
             params['enjoyment'] += alpha_enjoyment * prediction_error
         else:
             # Observational learning with penalty
-            params['enjoyment'] += (1 - observer_penalty) * alpha_enjoyment * prediction_error
+            params['enjoyment'] += (
+                observational_learning_gain(observer_penalty)
+                * alpha_enjoyment
+                * prediction_error
+            )
 
         params['enjoyment'] = np.clip(params['enjoyment'], -1, 1)
 
@@ -655,7 +696,13 @@ class Agent:
             observation_factor = min(1.5, 1 + expertise_gap)
 
             # Update skill with observation factors
-            params['skill'] += observer_penalty * alpha_skill * skill_modifier * observation_factor * (skill_level - params['skill'])
+            params['skill'] += (
+                observational_learning_gain(observer_penalty)
+                * alpha_skill
+                * skill_modifier
+                * observation_factor
+                * (skill_level - params['skill'])
+            )
 
         # Cultural resource boost - USE DEFENSIVE LOOKUP
         for culture_id, rel_params in self.relationships.items():
@@ -711,7 +758,10 @@ class Agent:
 
                 # Adjust perceived utility based on relationship
                 # Incorporate the observer's receptivity to the actor
-                perceived_utility = perceived_utility * receptivity
+                perceived_utility = qualify_social_signal(
+                    perceived_utility,
+                    receptivity,
+                )
 
             self.update_utility(behavior, setup, perceived_utility, performed, observer_penalty)
 
@@ -725,7 +775,10 @@ class Agent:
 
                 # Adjust perceived enjoyment based on relationship
                 # Incorporate the observer's receptivity to the actor
-                perceived_enjoyment = perceived_enjoyment * receptivity
+                perceived_enjoyment = qualify_social_signal(
+                    perceived_enjoyment,
+                    receptivity,
+                )
 
             self.update_enjoyment(behavior, setup, perceived_enjoyment, performed, observer_penalty)
 
@@ -763,6 +816,8 @@ class Agent:
             'behaviors': {},
             'relationships': {},
             'process_matrix': self.process_matrix,
+            'kappa_suggestion': self.kappa_suggestion,
+            'kappa_feedback': self.kappa_feedback,
         }
 
         # Serialize behaviors
@@ -795,6 +850,8 @@ class Agent:
         kwargs = {
             'name': data['name'],
             'process_matrix': data['process_matrix'],
+            'kappa_suggestion': data.get('kappa_suggestion', 0.5),
+            'kappa_feedback': data.get('kappa_feedback', 0.5),
         }
 
         # Add setups
@@ -851,33 +908,54 @@ class Agent:
         return best_params, best_score
 
 class Individual(Agent):
-    def __init__(self, name="", setups=None, behaviors=None, process_matrix=None, relationships=None):
+    def __init__(
+        self,
+        name="",
+        setups=None,
+        behaviors=None,
+        process_matrix=None,
+        relationships=None,
+        kappa_suggestion=0.5,
+        kappa_feedback=0.5,
+    ):
         # Change to explicitly use keyword arguments
         super().__init__(
             name=name,
             setups=setups,
             behaviors=behaviors,
             process_matrix=process_matrix,
-            relationships=relationships
+            relationships=relationships,
+            kappa_suggestion=kappa_suggestion,
+            kappa_feedback=kappa_feedback,
         )
         # Any Individual-specific initialization here
 
 class Group(Agent):
     def __init__(self, name="", setups=None, behaviors=None, process_matrix=None,
-                 relationships=None, size=1, homogeneity=1.0):
+                 relationships=None, size=1, homogeneity=1.0,
+                 kappa_suggestion=0.5, kappa_feedback=0.5):
         # Change to explicitly use keyword arguments
         super().__init__(
             name=name,
             setups=setups,
             behaviors=behaviors,
             process_matrix=process_matrix,
-            relationships=relationships
+            relationships=relationships,
+            kappa_suggestion=kappa_suggestion,
+            kappa_feedback=kappa_feedback,
         )
         self.size = size
         self.homogeneity = homogeneity
 
 class Culture(Agent):
-    def __init__(self, cultural_norms, relationships=None, name=""):
+    def __init__(
+        self,
+        cultural_norms,
+        relationships=None,
+        name="",
+        kappa_suggestion=0.5,
+        kappa_feedback=0.5,
+    ):
         """
         Static cultural framework that influences agents through norms/merit/resources.
         Inherits from Agent but with frozen parameters.
@@ -887,6 +965,8 @@ class Culture(Agent):
             behaviors=cultural_norms,  # Reuse behaviors dict for norms: {Behavior: {Setup: {normativity, merit, resource}}
             process_matrix={},  # No decision-making process
             relationships=relationships if relationships else {},
+            kappa_suggestion=kappa_suggestion,
+            kappa_feedback=kappa_feedback,
         )
         self.name = name
         self.frozen = True  # Immutable flag

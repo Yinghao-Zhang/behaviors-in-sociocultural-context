@@ -18,10 +18,15 @@ from sklearn.metrics import (
 
 from pdtrt_rerun_core import (
     BEHAVIORS,
-    CONTEXTS,
     STATE_NAMES,
     PanelView,
     stable_seed,
+)
+from social_influence import (
+    integrate_feedback,
+    integrate_suggestion,
+    observational_learning_gain,
+    qualify_social_signal,
 )
 
 
@@ -43,7 +48,7 @@ class EmpiricalBayesConfig:
     prior_sd_floor: float = 0.30
     prior_sd_ceiling: float = 2.50
     baseline_reliability: float = 0.70
-    observation_attenuation: float = 0.50
+    observer_penalty: float = 0.50
     lagged_c: float = 1.0
     seed: int = 20260718
 
@@ -76,7 +81,8 @@ SCHEMAS: Dict[str, ParameterSchema] = {
             "alpha_i_neg_logit",
             "alpha_e_logit",
             "alpha_u_logit",
-            "social_kappa_logit",
+            "kappa_suggestion_logit",
+            "kappa_feedback_logit",
             "tau_logit",
             "noise_logit",
         ),
@@ -89,6 +95,7 @@ SCHEMAS: Dict[str, ParameterSchema] = {
             (-6.0, 4.0),
             (-6.0, 6.0),
             (-6.0, 6.0),
+            (-6.0, 6.0),
             (-6.0, 4.0),
         ),
     ),
@@ -97,7 +104,7 @@ SCHEMAS: Dict[str, ParameterSchema] = {
         theta_names=(
             "weight_i_logratio",
             "weight_e_logratio",
-            "social_kappa_logit",
+            "kappa_suggestion_logit",
             "tau_logit",
             "noise_logit",
         ),
@@ -116,7 +123,8 @@ SCHEMAS: Dict[str, ParameterSchema] = {
             "alpha_i_pos_logit",
             "alpha_i_neg_logit",
             "alpha_reward_logit",
-            "social_kappa_logit",
+            "kappa_suggestion_logit",
+            "kappa_feedback_logit",
             "tau_logit",
             "noise_logit",
         ),
@@ -125,6 +133,7 @@ SCHEMAS: Dict[str, ParameterSchema] = {
             (-6.0, 4.0),
             (-6.0, 4.0),
             (-6.0, 4.0),
+            (-6.0, 6.0),
             (-6.0, 6.0),
             (-6.0, 6.0),
             (-6.0, 4.0),
@@ -145,7 +154,10 @@ CONDITIONAL_ORACLE_BLOCKS: Dict[str, Tuple[str, ...]] = {
         "alpha_e_logit",
         "alpha_u_logit",
     ),
-    "social_influence": ("social_kappa_logit",),
+    "social_integration": (
+        "kappa_suggestion_logit",
+        "kappa_feedback_logit",
+    ),
     "choice_both": (
         "tau_logit",
         "noise_logit",
@@ -158,10 +170,47 @@ CONDITIONAL_ORACLE_NATURAL_PARAMETERS: Dict[str, Tuple[str, ...]] = {
     "decision_weights": ("w_i", "w_e", "w_u"),
     "instinct_learning": ("alpha_i_pos", "alpha_i_neg"),
     "outcome_learning": ("alpha_e", "alpha_u"),
-    "social_influence": ("social_kappa",),
+    "social_integration": (
+        "kappa_suggestion",
+        "kappa_feedback",
+    ),
     "choice_both": ("tau", "noise_s"),
     "tau_only": ("tau",),
     "noise_only": ("noise_s",),
+}
+
+PARTIAL_RECOVERY_BLOCKS: Dict[str, Tuple[str, ...]] = {
+    "decision_weights": (
+        "weight_i_logratio",
+        "weight_e_logratio",
+    ),
+    "decision_weights_choice": (
+        "weight_i_logratio",
+        "weight_e_logratio",
+        "tau_logit",
+    ),
+    "full_process": tuple(
+        name
+        for name in SCHEMAS["tripartite"].theta_names
+        if name != "noise_logit"
+    ),
+}
+
+PARTIAL_RECOVERY_NATURAL_PARAMETERS: Dict[str, Tuple[str, ...]] = {
+    "decision_weights": ("w_i", "w_e", "w_u"),
+    "decision_weights_choice": ("w_i", "w_e", "w_u", "tau"),
+    "full_process": (
+        "w_i",
+        "w_e",
+        "w_u",
+        "alpha_i_pos",
+        "alpha_i_neg",
+        "alpha_e",
+        "alpha_u",
+        "kappa_suggestion",
+        "kappa_feedback",
+        "tau",
+    ),
 }
 
 
@@ -175,6 +224,7 @@ def _default_theta(model: str) -> np.ndarray:
                 logit(0.20),
                 logit(0.20),
                 logit(0.20),
+                logit(0.50),
                 logit(0.50),
                 logit((3.0 - 0.5) / 9.5),
                 logit(0.10 / 0.5),
@@ -199,6 +249,7 @@ def _default_theta(model: str) -> np.ndarray:
                 logit(0.20),
                 logit(0.20),
                 logit(0.20),
+                logit(0.50),
                 logit(0.50),
                 logit((3.0 - 0.5) / 9.5),
                 logit(0.10 / 0.5),
@@ -234,9 +285,21 @@ def unpack_theta(model: str, theta: np.ndarray) -> Dict[str, float]:
             "alpha_i_neg": alpha_i_neg,
             "alpha_e": alpha_e,
             "alpha_u": alpha_u,
-            "social_kappa": float(2.0 * expit(theta[offset])),
-            "tau": float(0.5 + 9.5 * expit(theta[offset + 1])),
-            "noise_s": float(0.5 * expit(theta[offset + 2])),
+            "kappa_suggestion": float(expit(theta[offset])),
+            "kappa_feedback": (
+                float(expit(theta[offset + 1]))
+                if model == "tripartite"
+                else 0.0
+            ),
+            "tau": float(
+                0.5
+                + 9.5
+                * expit(theta[offset + (2 if model == "tripartite" else 1)])
+            ),
+            "noise_s": float(
+                0.5
+                * expit(theta[offset + (3 if model == "tripartite" else 2)])
+            ),
         }
     if model == "collapsed_reward":
         w_i = float(expit(theta[0]))
@@ -246,9 +309,10 @@ def unpack_theta(model: str, theta: np.ndarray) -> Dict[str, float]:
             "alpha_i_pos": float(expit(theta[1])),
             "alpha_i_neg": float(expit(theta[2])),
             "alpha_reward": float(expit(theta[3])),
-            "social_kappa": float(2.0 * expit(theta[4])),
-            "tau": float(0.5 + 9.5 * expit(theta[5])),
-            "noise_s": float(0.5 * expit(theta[6])),
+            "kappa_suggestion": float(expit(theta[4])),
+            "kappa_feedback": float(expit(theta[5])),
+            "tau": float(0.5 + 9.5 * expit(theta[6])),
+            "noise_s": float(0.5 * expit(theta[7])),
         }
     raise ValueError(f"Unknown computational model: {model}")
 
@@ -275,7 +339,23 @@ def natural_to_theta(model: str, params: Mapping[str, float]) -> np.ndarray:
             )
         values.extend(
             [
-                bounded_logit(params["social_kappa"], 0.0, 2.0),
+                bounded_logit(
+                    params["kappa_suggestion"],
+                    0.0,
+                    1.0,
+                ),
+            ]
+        )
+        if model == "tripartite":
+            values.append(
+                bounded_logit(
+                    params["kappa_feedback"],
+                    0.0,
+                    1.0,
+                )
+            )
+        values.extend(
+            [
                 bounded_logit(params["tau"], 0.5, 10.0),
                 bounded_logit(params["noise_s"], 0.0, 0.5),
             ]
@@ -289,7 +369,16 @@ def natural_to_theta(model: str, params: Mapping[str, float]) -> np.ndarray:
                 bounded_logit(params["alpha_i_pos"], 0.0, 1.0),
                 bounded_logit(params["alpha_i_neg"], 0.0, 1.0),
                 bounded_logit(alpha_reward, 0.0, 1.0),
-                bounded_logit(params["social_kappa"], 0.0, 2.0),
+                bounded_logit(
+                    params["kappa_suggestion"],
+                    0.0,
+                    1.0,
+                ),
+                bounded_logit(
+                    params["kappa_feedback"],
+                    0.0,
+                    1.0,
+                ),
                 bounded_logit(params["tau"], 0.5, 10.0),
                 bounded_logit(params["noise_s"], 0.0, 0.5),
             ],
@@ -299,12 +388,13 @@ def natural_to_theta(model: str, params: Mapping[str, float]) -> np.ndarray:
 
 
 def _baseline_state(person_row: pd.Series, reliability: float) -> np.ndarray:
-    state = np.zeros((len(CONTEXTS), len(BEHAVIORS), len(STATE_NAMES)), dtype=float)
-    for context_idx, context in enumerate(CONTEXTS):
-        for behavior_idx, behavior in enumerate(BEHAVIORS):
-            for state_idx, state_name in enumerate(STATE_NAMES):
-                column = f"baseline_{state_name}_{context}_{behavior}"
-                state[context_idx, behavior_idx, state_idx] = reliability * float(person_row[column])
+    state = np.zeros((len(BEHAVIORS), len(STATE_NAMES)), dtype=float)
+    for behavior_idx, behavior in enumerate(BEHAVIORS):
+        for state_idx, state_name in enumerate(STATE_NAMES):
+            column = f"baseline_{state_name}_{behavior}"
+            state[behavior_idx, state_idx] = (
+                reliability * float(person_row[column])
+            )
     return np.clip(state, -1.0, 1.0)
 
 
@@ -315,11 +405,17 @@ def prepare_people(view: PanelView) -> List[Dict[str, object]]:
         events = view.events.loc[view.events["focal_id"] == focal_id].copy()
         events = events.sort_values(["timestamp_day", "event_id"]).reset_index(drop=True)
         model_arrays = {
-            "context_idx": events["context_idx"].to_numpy(dtype=np.int8),
             "behavior_idx": events["behavior_idx"].to_numpy(dtype=np.int8),
             "role_self": (events["role"] == "self").to_numpy(dtype=bool),
             "suggestion_avoid": events["suggestion_avoid"].to_numpy(dtype=float),
             "suggestion_approach": events["suggestion_approach"].to_numpy(dtype=float),
+            "suggestion_active": events["suggestion_active"].to_numpy(
+                dtype=bool
+            ),
+            "feedback": events["feedback"].to_numpy(dtype=float),
+            "feedback_active": events["feedback_active"].to_numpy(
+                dtype=bool
+            ),
             "relationship_receptivity": events[
                 "relationship_receptivity"
             ].to_numpy(dtype=float),
@@ -373,8 +469,7 @@ def _forward_person(
         instinct = state[..., 0].copy()
         reward = 0.5 * (state[..., 1] + state[..., 2])
 
-    for event_index in range(len(arrays["context_idx"])):
-        context_idx = int(arrays["context_idx"][event_index])
+    for event_index in range(len(arrays["behavior_idx"])):
         behavior_idx = int(arrays["behavior_idx"][event_index])
         suggestion = np.array(
             [
@@ -383,16 +478,28 @@ def _forward_person(
             ],
             dtype=float,
         )
+        receptivity = float(
+            arrays["relationship_receptivity"][event_index]
+        )
+        suggestion_present = bool(
+            arrays["suggestion_active"][event_index]
+        )
 
         if model == "collapsed_reward":
-            choice_values = (
-                params["w_i"] * instinct[context_idx]
-                + params["w_reward"] * reward[context_idx]
-                + params["social_kappa"] * suggestion
+            personal_choice_values = (
+                params["w_i"] * instinct
+                + params["w_reward"] * reward
             )
         else:
             weights = np.array([params["w_i"], params["w_e"], params["w_u"]], dtype=float)
-            choice_values = state[context_idx] @ weights + params["social_kappa"] * suggestion
+            personal_choice_values = state @ weights
+        choice_values = integrate_suggestion(
+            personal_choice_values,
+            suggestion,
+            receptivity,
+            params["kappa_suggestion"],
+            suggestion_present=suggestion_present,
+        )
 
         probability = _marginal_choice_probability(
             float(choice_values[1] - choice_values[0]),
@@ -416,56 +523,78 @@ def _forward_person(
             continue
         gain = 1.0
         if not arrays["role_self"][event_index]:
-            receptivity = float(
-                arrays["relationship_receptivity"][event_index]
-            )
-            gain = cfg.observation_attenuation * (0.5 + 0.5 * receptivity)
-            gain = float(np.clip(gain, 0.0, cfg.observation_attenuation))
+            gain = observational_learning_gain(cfg.observer_penalty)
         other = 1 - behavior_idx
-        enjoyment = float(arrays["enjoyment_out"][event_index])
-        utility = float(arrays["utility_out"][event_index])
+        direct_enjoyment = float(arrays["enjoyment_out"][event_index])
+        direct_utility = float(arrays["utility_out"][event_index])
+        if arrays["role_self"][event_index]:
+            enjoyment = direct_enjoyment
+            utility = float(
+                integrate_feedback(
+                    direct_utility,
+                    float(arrays["feedback"][event_index]),
+                    receptivity,
+                    params["kappa_feedback"],
+                    feedback_present=bool(
+                        arrays["feedback_active"][event_index]
+                    ),
+                )
+            )
+        else:
+            enjoyment = float(
+                qualify_social_signal(
+                    direct_enjoyment,
+                    receptivity,
+                )
+            )
+            utility = float(
+                qualify_social_signal(
+                    direct_utility,
+                    receptivity,
+                )
+            )
 
         if model == "collapsed_reward":
-            instinct[context_idx, behavior_idx] += (
+            instinct[behavior_idx] += (
                 gain
                 * params["alpha_i_pos"]
-                * (1.0 - instinct[context_idx, behavior_idx])
+                * (1.0 - instinct[behavior_idx])
             )
-            instinct[context_idx, other] += (
+            instinct[other] += (
                 gain
                 * params["alpha_i_neg"]
-                * (-1.0 - instinct[context_idx, other])
+                * (-1.0 - instinct[other])
             )
             outcome = 0.5 * (enjoyment + utility)
-            reward[context_idx, behavior_idx] += (
+            reward[behavior_idx] += (
                 gain
                 * params["alpha_reward"]
-                * (outcome - reward[context_idx, behavior_idx])
+                * (outcome - reward[behavior_idx])
             )
-            instinct[context_idx] = np.clip(instinct[context_idx], -1.0, 1.0)
-            reward[context_idx] = np.clip(reward[context_idx], -1.0, 1.0)
+            instinct = np.clip(instinct, -1.0, 1.0)
+            reward = np.clip(reward, -1.0, 1.0)
         else:
-            state[context_idx, behavior_idx, 0] += (
+            state[behavior_idx, 0] += (
                 gain
                 * params["alpha_i_pos"]
-                * (1.0 - state[context_idx, behavior_idx, 0])
+                * (1.0 - state[behavior_idx, 0])
             )
-            state[context_idx, other, 0] += (
+            state[other, 0] += (
                 gain
                 * params["alpha_i_neg"]
-                * (-1.0 - state[context_idx, other, 0])
+                * (-1.0 - state[other, 0])
             )
-            state[context_idx, behavior_idx, 1] += (
+            state[behavior_idx, 1] += (
                 gain
                 * params["alpha_e"]
-                * (enjoyment - state[context_idx, behavior_idx, 1])
+                * (enjoyment - state[behavior_idx, 1])
             )
-            state[context_idx, behavior_idx, 2] += (
+            state[behavior_idx, 2] += (
                 gain
                 * params["alpha_u"]
-                * (utility - state[context_idx, behavior_idx, 2])
+                * (utility - state[behavior_idx, 2])
             )
-            state[context_idx] = np.clip(state[context_idx], -1.0, 1.0)
+            state = np.clip(state, -1.0, 1.0)
     return float(nll), predictions
 
 
@@ -695,16 +824,25 @@ def fit_conditional_oracle(
     model: str,
     block: str,
     cfg: EmpiricalBayesConfig,
+    initial_population_theta: np.ndarray | None = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float]]:
     if model != "tripartite":
         raise ValueError("Conditional oracle blocks are defined for tripartite fits")
-    if block not in CONDITIONAL_ORACLE_BLOCKS:
+    block_definitions = {
+        **CONDITIONAL_ORACLE_BLOCKS,
+        **PARTIAL_RECOVERY_BLOCKS,
+    }
+    natural_parameters = {
+        **CONDITIONAL_ORACLE_NATURAL_PARAMETERS,
+        **PARTIAL_RECOVERY_NATURAL_PARAMETERS,
+    }
+    if block not in block_definitions:
         raise ValueError(f"Unknown conditional oracle block: {block}")
     if cfg.variance_update not in {"laplace", "modal"}:
         raise ValueError("variance_update must be either 'laplace' or 'modal'")
 
     schema = SCHEMAS[model]
-    free_names = CONDITIONAL_ORACLE_BLOCKS[block]
+    free_names = block_definitions[block]
     free_indices = np.asarray(
         [schema.theta_names.index(name) for name in free_names],
         dtype=int,
@@ -729,7 +867,11 @@ def fit_conditional_oracle(
         }
         true_theta_by_id[int(focal_id)] = natural_to_theta(model, natural)
 
-    population_theta = _default_theta(model)
+    population_theta = (
+        _default_theta(model)
+        if initial_population_theta is None
+        else np.asarray(initial_population_theta, dtype=float).copy()
+    )
     sigma_free = np.full(
         len(free_indices),
         cfg.prior_sd_initial,
@@ -863,7 +1005,7 @@ def fit_conditional_oracle(
         population_theta,
         cfg.baseline_reliability,
     )
-    target_parameters = set(CONDITIONAL_ORACLE_NATURAL_PARAMETERS[block])
+    target_parameters = set(natural_parameters[block])
     block_recovery = recovery.loc[
         (recovery["level"] == "person")
         & recovery["parameter"].isin(target_parameters)
@@ -889,6 +1031,65 @@ def fit_conditional_oracle(
         "free_theta_count": float(len(free_indices)),
     }
     return person_parameters, block_recovery, diagnostics
+
+
+def fit_partial_population_block(
+    view: PanelView,
+    model: str,
+    block: str,
+    cfg: EmpiricalBayesConfig,
+    population_theta: np.ndarray | None = None,
+) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, float], np.ndarray]:
+    """Fit selected person parameters while holding all others at one group estimate."""
+    if model != "tripartite":
+        raise ValueError("Partial population blocks are defined for tripartite fits")
+    if block not in PARTIAL_RECOVERY_BLOCKS:
+        raise ValueError(f"Unknown partial population block: {block}")
+
+    if population_theta is None:
+        people = prepare_people(view)
+        population_theta, population_diagnostics = fit_population_model(
+            people,
+            model,
+            cfg,
+        )
+    else:
+        population_theta = np.asarray(population_theta, dtype=float).copy()
+        population_diagnostics = {}
+    population_natural = unpack_theta(model, population_theta)
+    target_parameters = set(PARTIAL_RECOVERY_NATURAL_PARAMETERS[block])
+
+    conditioned_truth = view.people_truth.copy()
+    for parameter, value in population_natural.items():
+        if parameter in target_parameters:
+            continue
+        column = f"true_{parameter}"
+        if column in conditioned_truth:
+            conditioned_truth[column] = float(value)
+
+    conditioned_view = PanelView(
+        sample_size=view.sample_size,
+        missing_rate=view.missing_rate,
+        events=view.events,
+        people=view.people,
+        people_truth=conditioned_truth,
+        diagnostics=view.diagnostics,
+    )
+    person_parameters, recovery, diagnostics = fit_conditional_oracle(
+        conditioned_view,
+        model,
+        block,
+        cfg,
+        initial_population_theta=population_theta,
+    )
+    diagnostics.update(
+        {
+            f"population_{name}": float(value)
+            for name, value in population_diagnostics.items()
+        }
+    )
+    diagnostics["nuisance_parameters_fixed_to_population_estimate"] = 1.0
+    return person_parameters, recovery, diagnostics, population_theta
 
 
 def summarize_population_recovery(
@@ -926,7 +1127,8 @@ def summarize_population_recovery(
             "alpha_i_neg",
             "alpha_e",
             "alpha_u",
-            "social_kappa",
+            "kappa_suggestion",
+            "kappa_feedback",
             "choice_consistency",
         )
     elif model == "no_learning":
@@ -934,7 +1136,7 @@ def summarize_population_recovery(
             "w_i",
             "w_e",
             "w_u",
-            "social_kappa",
+            "kappa_suggestion",
             "choice_consistency",
         )
     elif model == "collapsed_reward":
@@ -944,7 +1146,8 @@ def summarize_population_recovery(
             "alpha_i_pos",
             "alpha_i_neg",
             "alpha_reward",
-            "social_kappa",
+            "kappa_suggestion",
+            "kappa_feedback",
             "choice_consistency",
         )
     else:
@@ -1011,25 +1214,24 @@ def fit_population_model(
             )
         )
 
+    def objective(active_theta: np.ndarray) -> float:
+        theta = fixed_theta.copy()
+        theta[free_indices] = active_theta
+        return float(
+            sum(
+                _forward_person(
+                    theta,
+                    model,
+                    person,
+                    cfg,
+                    collect_predictions=False,
+                )[0]
+                for person in train_people
+            )
+        )
+
     solutions = []
     for start_idx, start in enumerate(starts):
-
-        def objective(active_theta: np.ndarray) -> float:
-            theta = fixed_theta.copy()
-            theta[free_indices] = active_theta
-            return float(
-                sum(
-                    _forward_person(
-                        theta,
-                        model,
-                        person,
-                        cfg,
-                        collect_predictions=False,
-                    )[0]
-                    for person in train_people
-                )
-            )
-
         result = minimize(
             objective,
             start,
@@ -1039,8 +1241,34 @@ def fit_population_model(
         )
         solutions.append((float(result.fun), start_idx, result))
 
-    solutions.sort(key=lambda item: item[0])
-    best_value, best_start, best = solutions[0]
+    primary_success_rate = float(
+        np.mean([bool(result.success) for _, _, result in solutions])
+    )
+    fallback_used = 0.0
+    if not any(result.success for _, _, result in solutions):
+        fallback_used = 1.0
+        primary_best = min(solutions, key=lambda item: item[0])[2]
+        fallback = minimize(
+            objective,
+            np.asarray(primary_best.x, dtype=float),
+            method="Powell",
+            bounds=free_bounds,
+            options={
+                "maxiter": max(500, cfg.max_iter * 4),
+                "ftol": 1e-9,
+                "xtol": 1e-7,
+            },
+        )
+        solutions.append((float(fallback.fun), len(starts), fallback))
+
+    successful = [
+        solution for solution in solutions if bool(solution[2].success)
+    ]
+    selection_pool = successful or solutions
+    best_value, best_start, best = min(
+        selection_pool,
+        key=lambda item: item[0],
+    )
     population_theta = fixed_theta.copy()
     population_theta[free_indices] = np.asarray(best.x, dtype=float)
     solution_matrix = np.vstack(
@@ -1052,6 +1280,8 @@ def fit_population_model(
         ),
         "training_people_with_choice": float(len(train_people)),
         "optimizer_success_rate": float(bool(best.success)),
+        "primary_optimizer_success_rate": primary_success_rate,
+        "fallback_optimizer_used": fallback_used,
         "optimizer_status": float(best.status),
         "objective": best_value,
         "best_start": float(best_start),
@@ -1107,28 +1337,20 @@ def _lagged_features(person: Mapping[str, object]) -> Tuple[np.ndarray, np.ndarr
     prior_utility = 0.0
     event_counter = 0
     for _, event in events.iterrows():
-        context_idx = int(event["context_idx"])
-        context_one_hot = np.zeros(len(CONTEXTS), dtype=float)
-        context_one_hot[context_idx] = 1.0
         elapsed = float(event["elapsed_since_prior_observed"])
         if not np.isfinite(elapsed):
             elapsed = 0.0
-        x = np.concatenate(
+        x = np.array(
             [
-                context_one_hot,
-                np.array(
-                    [
-                        float(event["suggestion_approach"] - event["suggestion_avoid"]),
-                        float(event["relationship_warmth"]),
-                        float(event["relationship_receptivity"]),
-                        np.log1p(max(0.0, elapsed)),
-                        prior_self_choice,
-                        prior_behavior,
-                        prior_enjoyment,
-                        prior_utility,
-                        np.log1p(event_counter),
-                    ]
-                ),
+                float(event["suggestion_approach"] - event["suggestion_avoid"]),
+                float(event["relationship_warmth"]),
+                float(event["relationship_receptivity"]),
+                np.log1p(max(0.0, elapsed)),
+                prior_self_choice,
+                prior_behavior,
+                prior_enjoyment,
+                prior_utility,
+                np.log1p(event_counter),
             ]
         )
         if event["role"] == "self":
@@ -1148,7 +1370,7 @@ def _lagged_features(person: Mapping[str, object]) -> Tuple[np.ndarray, np.ndarr
         event_counter += 1
     if features:
         return np.vstack(features), np.asarray(outcomes, dtype=int), metadata
-    return np.empty((0, len(CONTEXTS) + 9)), np.empty(0, dtype=int), metadata
+    return np.empty((0, 9)), np.empty(0, dtype=int), metadata
 
 
 def fit_lagged_model(
@@ -1319,7 +1541,10 @@ def _true_parameter_table(
             "alpha_i_neg": float(row["true_alpha_i_neg"]),
             "alpha_e": float(row["true_alpha_e"]),
             "alpha_u": float(row["true_alpha_u"]),
-            "social_kappa": float(row["true_social_kappa"]),
+            "kappa_suggestion": float(
+                row["true_kappa_suggestion"]
+            ),
+            "kappa_feedback": float(row["true_kappa_feedback"]),
             "tau": float(row["true_tau"]),
             "noise_s": float(row["true_noise_s"]),
         }
@@ -1399,21 +1624,20 @@ def summarize_recovery(
     for state_name in STATE_NAMES:
         true_values = []
         estimated_values = []
-        for context in CONTEXTS:
-            for behavior in BEHAVIORS:
-                true_column = f"initial_{state_name}_{context}_{behavior}"
-                observed_column = f"baseline_{state_name}_{context}_{behavior}"
-                common_ids = observed_people.index.intersection(true_people.index)
-                true_values.extend(
-                    true_people.loc[common_ids, true_column].to_numpy(dtype=float)
-                )
-                estimated_values.extend(
-                    baseline_reliability
-                    * observed_people.loc[
-                        common_ids,
-                        observed_column,
-                    ].to_numpy(dtype=float)
-                )
+        for behavior in BEHAVIORS:
+            true_column = f"initial_{state_name}_{behavior}"
+            observed_column = f"baseline_{state_name}_{behavior}"
+            common_ids = observed_people.index.intersection(true_people.index)
+            true_values.extend(
+                true_people.loc[common_ids, true_column].to_numpy(dtype=float)
+            )
+            estimated_values.extend(
+                baseline_reliability
+                * observed_people.loc[
+                    common_ids,
+                    observed_column,
+                ].to_numpy(dtype=float)
+            )
         true_array = np.asarray(true_values, dtype=float)
         fitted_array = np.asarray(estimated_values, dtype=float)
         if len(true_array):
@@ -1566,6 +1790,7 @@ def flatten_result(
             initial["correlation"].mean()
         )
         row["initial_state_mean_rmse"] = float(initial["rmse"].mean())
+        class_recovery = person if not person.empty else population
         parameter_classes = {
             "decision_weight": {"w_i", "w_e", "w_u", "w_reward"},
             "learning_rate": {
@@ -1575,11 +1800,20 @@ def flatten_result(
                 "alpha_u",
                 "alpha_reward",
             },
-            "social_influence": {"social_kappa"},
-            "choice_consistency": {"tau", "noise_s"},
+            "social_integration": {
+                "kappa_suggestion",
+                "kappa_feedback",
+            },
+            "choice_consistency": {
+                "choice_consistency",
+                "tau",
+                "noise_s",
+            },
         }
         for class_name, parameters in parameter_classes.items():
-            subset = person.loc[person["parameter"].isin(parameters)]
+            subset = class_recovery.loc[
+                class_recovery["parameter"].isin(parameters)
+            ]
             row[f"{class_name}_mean_correlation"] = float(
                 subset["correlation"].mean()
             )
@@ -1594,7 +1828,7 @@ def flatten_result(
         for class_name in (
             "decision_weight",
             "learning_rate",
-            "social_influence",
+            "social_integration",
             "choice_consistency",
         ):
             row[f"{class_name}_mean_correlation"] = np.nan

@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import math
 import os
-import re
 import tempfile
 from pathlib import Path
 from typing import Dict, Iterable, Sequence
@@ -23,6 +21,21 @@ import numpy as np
 import pandas as pd
 
 from pdtrt_rerun_core import atomic_write_csv, atomic_write_json
+from pdtrt_adequacy import (
+    CELL_KEYS,
+    CHOICE_CONSISTENCY_LOG_ERROR_MAXIMUM,
+    DEFAULT_THRESHOLDS,
+    MEAN_ECE_MAXIMUM,
+    RELATIVE_LOG_LOSS_SKILL_MINIMUM,
+    REPLICATE_ECE_MAXIMUM,
+    REPLICATE_KEYS,
+    REPLICATE_PASS_FRACTION_MINIMUM,
+    UNIT_INTERVAL_CLASS_ERROR_MAXIMUM,
+    cell_diagnostics,
+    population_recovery_diagnostics,
+    prediction_diagnostics,
+    read_population_recovery,
+)
 
 
 MODELS = (
@@ -50,33 +63,10 @@ PROFILE_LABELS = {
     "socially_contingent": "social-oriented",
 }
 ENVIRONMENT_LABELS = {
-    "repair_supportive": "Approach-supportive",
-    "escalation_prone": "Avoidance-supportive",
-    "inconsistent_ambiguous": "Mixed/ambiguous",
+    "approach_oriented": "Approach-oriented",
+    "avoidance_oriented": "Avoidance-oriented",
+    "mixed": "Mixed",
 }
-REPLICATE_PASS_FRACTION_MINIMUM = 0.80
-RELATIVE_LOG_LOSS_SKILL_MINIMUM = 0.05
-MEAN_ECE_MAXIMUM = 0.10
-REPLICATE_ECE_MAXIMUM = 0.15
-UNIT_INTERVAL_CLASS_ERROR_MAXIMUM = 0.10
-SOCIAL_INFLUENCE_RANGE = 2.0
-CHOICE_CONSISTENCY_LOG_ERROR_MAXIMUM = math.log(1.25)
-
-CELL_KEYS = (
-    "profile",
-    "environment",
-    "mean_events",
-    "sample_size",
-    "missing_rate",
-)
-REPLICATE_KEYS = (*CELL_KEYS, "replicate")
-RECOVERY_FILE_PATTERN = re.compile(
-    r"profile=([^/]+)/environment=([^/]+)/events=(\d+)/"
-    r"replicate=(\d+)/views/N=(\d+)/missing=(\d+)/fits/"
-    r"estimator=population/model=tripartite/recovery\.csv$"
-)
-
-
 def _write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -85,211 +75,35 @@ def _write_text(path: Path, text: str) -> None:
 
 
 def _prediction_diagnostics(run_summary: pd.DataFrame) -> pd.DataFrame:
-    tripartite = run_summary.loc[
-        run_summary["model"] == "tripartite"
-    ].copy()
-    base_rate = run_summary.loc[
-        run_summary["model"] == "prevalence_null",
-        [*REPLICATE_KEYS, "metric_log_loss"],
-    ].rename(columns={"metric_log_loss": "base_rate_log_loss"})
-    no_learning = run_summary.loc[
-        run_summary["model"] == "no_learning",
-        [*REPLICATE_KEYS, "metric_log_loss"],
-    ].rename(columns={"metric_log_loss": "no_learning_log_loss"})
-    tripartite = tripartite.merge(
-        base_rate,
-        on=list(REPLICATE_KEYS),
-        how="left",
-        validate="one_to_one",
+    return prediction_diagnostics(
+        run_summary,
+        expected_replicates=20,
+        thresholds=DEFAULT_THRESHOLDS,
     )
-    tripartite = tripartite.merge(
-        no_learning,
-        on=list(REPLICATE_KEYS),
-        how="left",
-        validate="one_to_one",
-    )
-    tripartite["relative_log_loss_skill"] = (
-        tripartite["base_rate_log_loss"] - tripartite["metric_log_loss"]
-    ) / tripartite["base_rate_log_loss"]
-
-    rows = []
-    for keys, group in tripartite.groupby(list(CELL_KEYS), dropna=False):
-        finite = (
-            np.isfinite(group["metric_log_loss"])
-            & np.isfinite(group["relative_log_loss_skill"])
-            & np.isfinite(group["metric_ece"])
-        )
-        optimizer = (
-            group["diagnostic_optimizer_success_rate"].to_numpy(dtype=float)
-            >= 0.80
-        )
-        skill = group["relative_log_loss_skill"].to_numpy(dtype=float)
-        ece = group["metric_ece"].to_numpy(dtype=float)
-        row = dict(zip(CELL_KEYS, keys))
-        row.update(
-            {
-                "replicate_count": len(group),
-                "complete_replicates": len(group) == 20,
-                "finite_prediction_fraction": float(np.mean(finite)),
-                "optimizer_pass_fraction": float(np.mean(optimizer)),
-                "mean_log_loss": float(group["metric_log_loss"].mean()),
-                "mean_base_rate_log_loss": float(
-                    group["base_rate_log_loss"].mean()
-                ),
-                "mean_relative_log_loss_skill": float(np.mean(skill)),
-                "relative_skill_pass_fraction": float(
-                    np.mean(skill >= RELATIVE_LOG_LOSS_SKILL_MINIMUM)
-                ),
-                "mean_ece": float(np.mean(ece)),
-                "ece_stability_pass_fraction": float(
-                    np.mean(ece <= REPLICATE_ECE_MAXIMUM)
-                ),
-                "mean_tripartite_improvement_over_no_learning": float(
-                    np.mean(
-                        group["no_learning_log_loss"]
-                        - group["metric_log_loss"]
-                    )
-                ),
-            }
-        )
-        row["minimum_predictive_signal"] = bool(
-            row["complete_replicates"]
-            and row["finite_prediction_fraction"]
-            >= REPLICATE_PASS_FRACTION_MINIMUM
-            and row["optimizer_pass_fraction"]
-            >= REPLICATE_PASS_FRACTION_MINIMUM
-            and row["mean_relative_log_loss_skill"]
-            >= RELATIVE_LOG_LOSS_SKILL_MINIMUM
-            and row["relative_skill_pass_fraction"]
-            >= REPLICATE_PASS_FRACTION_MINIMUM
-            and row["mean_ece"] <= MEAN_ECE_MAXIMUM
-            and row["ece_stability_pass_fraction"]
-            >= REPLICATE_PASS_FRACTION_MINIMUM
-        )
-        rows.append(row)
-    return pd.DataFrame(rows)
 
 
 def _read_population_recovery(main: Path) -> pd.DataFrame:
-    rows = []
-    for path in main.glob(
-        "conditions/**/fits/estimator=population/model=tripartite/recovery.csv"
-    ):
-        match = RECOVERY_FILE_PATTERN.search(path.as_posix())
-        if match is None:
-            continue
-        profile, environment, events, replicate, sample_size, missing = (
-            match.groups()
-        )
-        parameters: Dict[str, Dict[str, float]] = {}
-        with path.open(newline="") as stream:
-            for record in csv.DictReader(stream):
-                if record["level"] != "population":
-                    continue
-                parameters[record["parameter"]] = {
-                    "absolute_error": abs(float(record["bias"])),
-                    "true_mean": float(record["true_mean"]),
-                    "estimate": float(record["estimate"]),
-                }
-
-        weight_error = float(
-            np.mean(
-                [
-                    parameters[name]["absolute_error"]
-                    for name in ("w_i", "w_e", "w_u")
-                ]
-            )
-        )
-        learning_error = float(
-            np.mean(
-                [
-                    parameters[name]["absolute_error"]
-                    for name in (
-                        "alpha_i_pos",
-                        "alpha_i_neg",
-                        "alpha_e",
-                        "alpha_u",
-                    )
-                ]
-            )
-        )
-        social_error = (
-            parameters["social_kappa"]["absolute_error"]
-            / SOCIAL_INFLUENCE_RANGE
-        )
-        choice_true = parameters["choice_consistency"]["true_mean"]
-        choice_estimate = parameters["choice_consistency"]["estimate"]
-        choice_error = abs(math.log(choice_estimate / choice_true))
-        rows.append(
-            {
-                "profile": profile,
-                "environment": environment,
-                "mean_events": float(events),
-                "sample_size": float(sample_size),
-                "missing_rate": float(missing) / 100.0,
-                "replicate": int(replicate),
-                "decision_weight_scaled_error": weight_error,
-                "learning_rate_scaled_error": learning_error,
-                "social_influence_scaled_error": social_error,
-                "choice_consistency_scaled_error": choice_error,
-            }
-        )
-    recovery = pd.DataFrame(rows)
-    expected = 5 * 3 * 3 * 3 * 3 * 20
-    if len(recovery) != expected:
-        raise ValueError(
-            f"Expected {expected} tripartite recovery files, found "
-            f"{len(recovery)}."
-        )
-    return recovery
+    return read_population_recovery(main, expected_count=8100)
 
 
 def _population_recovery_diagnostics(recovery: pd.DataFrame) -> pd.DataFrame:
-    thresholds = {
-        "decision_weight": UNIT_INTERVAL_CLASS_ERROR_MAXIMUM,
-        "learning_rate": UNIT_INTERVAL_CLASS_ERROR_MAXIMUM,
-        "social_influence": UNIT_INTERVAL_CLASS_ERROR_MAXIMUM,
-        "choice_consistency": CHOICE_CONSISTENCY_LOG_ERROR_MAXIMUM,
-    }
-    rows = []
-    for keys, group in recovery.groupby(list(CELL_KEYS), dropna=False):
-        row = dict(zip(CELL_KEYS, keys))
-        row["recovery_replicate_count"] = len(group)
-        class_flags = []
-        for class_name, threshold in thresholds.items():
-            values = group[f"{class_name}_scaled_error"].to_numpy(
-                dtype=float
-            )
-            mean_error = float(np.mean(values))
-            pass_fraction = float(np.mean(values <= threshold))
-            class_pass = bool(
-                np.isfinite(mean_error)
-                and mean_error <= threshold
-                and pass_fraction >= REPLICATE_PASS_FRACTION_MINIMUM
-            )
-            row[f"mean_{class_name}_scaled_error"] = mean_error
-            row[f"{class_name}_pass_fraction"] = pass_fraction
-            row[f"{class_name}_recovery"] = class_pass
-            class_flags.append(class_pass)
-        row["full_vector_recovery"] = bool(all(class_flags))
-        rows.append(row)
-    return pd.DataFrame(rows)
+    return population_recovery_diagnostics(
+        recovery,
+        thresholds=DEFAULT_THRESHOLDS,
+    )
 
 
 def _cell_diagnostics(
     main: Path,
     run_summary: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    prediction = _prediction_diagnostics(run_summary)
-    recovery_replicates = _read_population_recovery(main)
-    recovery = _population_recovery_diagnostics(recovery_replicates)
-    cells = prediction.merge(
-        recovery,
-        on=list(CELL_KEYS),
-        how="inner",
-        validate="one_to_one",
+    return cell_diagnostics(
+        main,
+        run_summary,
+        expected_replicates=20,
+        expected_recovery_files=8100,
+        thresholds=DEFAULT_THRESHOLDS,
     )
-    return cells, recovery_replicates
 
 
 def _prediction_threshold_sensitivity(
@@ -351,7 +165,7 @@ def _recovery_threshold_sensitivity(
     base_thresholds = {
         "decision_weight": UNIT_INTERVAL_CLASS_ERROR_MAXIMUM,
         "learning_rate": UNIT_INTERVAL_CLASS_ERROR_MAXIMUM,
-        "social_influence": UNIT_INTERVAL_CLASS_ERROR_MAXIMUM,
+        "social_integration": UNIT_INTERVAL_CLASS_ERROR_MAXIMUM,
         "choice_consistency": CHOICE_CONSISTENCY_LOG_ERROR_MAXIMUM,
     }
     rows = []
@@ -397,7 +211,10 @@ def _design_grid(cells: pd.DataFrame) -> pd.DataFrame:
         full_vector_recovery_rate=("full_vector_recovery", "mean"),
         decision_weight_recovery_rate=("decision_weight_recovery", "mean"),
         learning_rate_recovery_rate=("learning_rate_recovery", "mean"),
-        social_influence_recovery_rate=("social_influence_recovery", "mean"),
+        social_integration_recovery_rate=(
+            "social_integration_recovery",
+            "mean",
+        ),
         choice_consistency_recovery_rate=(
             "choice_consistency_recovery",
             "mean",
@@ -420,8 +237,8 @@ def _design_grid(cells: pd.DataFrame) -> pd.DataFrame:
             "mean_learning_rate_scaled_error",
             "mean",
         ),
-        mean_social_influence_scaled_error=(
-            "mean_social_influence_scaled_error",
+        mean_social_integration_scaled_error=(
+            "mean_social_integration_scaled_error",
             "mean",
         ),
         mean_choice_consistency_scaled_error=(
@@ -469,8 +286,8 @@ def _factor_summary(
                 "learning_rate_recovery",
                 "mean",
             ),
-            social_influence_recovery_rate=(
-                "social_influence_recovery",
+            social_integration_recovery_rate=(
+                "social_integration_recovery",
                 "mean",
             ),
             choice_consistency_recovery_rate=(
@@ -491,8 +308,8 @@ def _factor_summary(
                 "mean_learning_rate_scaled_error",
                 "mean",
             ),
-            mean_social_influence_scaled_error=(
-                "mean_social_influence_scaled_error",
+            mean_social_integration_scaled_error=(
+                "mean_social_integration_scaled_error",
                 "mean",
             ),
             mean_choice_consistency_scaled_error=(
@@ -604,7 +421,7 @@ def _missingness_summary(
     error_columns = [
         "decision_weight_scaled_error",
         "learning_rate_scaled_error",
-        "social_influence_scaled_error",
+        "social_integration_scaled_error",
         "choice_consistency_scaled_error",
     ]
     wide = recovery.pivot_table(
@@ -640,7 +457,7 @@ def _phenotype_environment_event_summary(
         "prediction_criterion_rate": "minimum_predictive_signal",
         "decision_weight_recovery_rate": "decision_weight_recovery",
         "learning_rate_recovery_rate": "learning_rate_recovery",
-        "social_influence_recovery_rate": "social_influence_recovery",
+        "social_integration_recovery_rate": "social_integration_recovery",
         "choice_consistency_recovery_rate": "choice_consistency_recovery",
     }
     rows = []
@@ -827,11 +644,14 @@ def _plot_design_grid(grid: pd.DataFrame, output: Path) -> None:
     )
     missing_rates = (0.0, 0.1, 0.2)
     row_specs = (
-        ("predictive_signal_rate", "Prediction benchmark"),
+        ("predictive_signal_rate", "Prediction criterion"),
         ("decision_weight_recovery_rate", "Decision weights"),
         ("learning_rate_recovery_rate", "Learning rates"),
-        ("social_influence_recovery_rate", "Social influence"),
-        ("choice_consistency_recovery_rate", "Choice consistency"),
+        ("social_integration_recovery_rate", "Social-influence weights"),
+        (
+            "choice_consistency_recovery_rate",
+            "Effective choice consistency",
+        ),
     )
     image = None
     for row, (value, row_label) in enumerate(row_specs):
@@ -840,7 +660,7 @@ def _plot_design_grid(grid: pd.DataFrame, output: Path) -> None:
             frame = grid.loc[grid["missing_rate"] == missing_rate]
             image = _heatmap(axis, frame, value, "", "viridis")
             if row == 0:
-                axis.set_title(f"{int(100 * missing_rate)}% missingness")
+                axis.set_title(f"{int(100 * missing_rate)}% Missingness")
             if column == 0:
                 axis.set_ylabel(f"{row_label}\nSample size")
             else:
@@ -854,12 +674,6 @@ def _plot_design_grid(grid: pd.DataFrame, output: Path) -> None:
             shrink=0.84,
             label="Conditions meeting criterion",
         )
-    figure.suptitle(
-        "Percentage of Simulation Conditions Meeting Prediction and "
-        "Parameter-Recovery Criteria\nby Sample Size, Mean Number of Events "
-        "per Participant, and Missingness",
-        fontsize=12,
-    )
     figure.savefig(output.with_suffix(".png"), dpi=300, bbox_inches="tight")
     figure.savefig(output.with_suffix(".pdf"), bbox_inches="tight")
     plt.close(figure)
@@ -877,17 +691,20 @@ def _plot_phenotype_environment_by_events(
         "socially_contingent",
     ]
     environment_order = [
-        "repair_supportive",
-        "inconsistent_ambiguous",
-        "escalation_prone",
+        "approach_oriented",
+        "mixed",
+        "avoidance_oriented",
     ]
     event_yields = [10, 25, 50]
     row_specs = (
-        ("prediction_criterion_rate", "Prediction benchmark"),
+        ("prediction_criterion_rate", "Prediction criterion"),
         ("decision_weight_recovery_rate", "Decision weights"),
         ("learning_rate_recovery_rate", "Learning rates"),
-        ("social_influence_recovery_rate", "Social influence"),
-        ("choice_consistency_recovery_rate", "Choice consistency"),
+        ("social_integration_recovery_rate", "Social-influence weights"),
+        (
+            "choice_consistency_recovery_rate",
+            "Effective choice consistency",
+        ),
     )
     figure, axes = plt.subplots(
         5,
@@ -954,7 +771,7 @@ def _plot_phenotype_environment_by_events(
                     )
             if row == 0:
                 axis.set_title(
-                    f"{mean_events} mean events per participant",
+                    f"Mean of {mean_events} Events per Participant",
                     fontsize=10,
                 )
             if column == 0:
@@ -970,12 +787,6 @@ def _plot_phenotype_environment_by_events(
             shrink=0.84,
             label="Simulation conditions meeting criterion",
         )
-    figure.suptitle(
-        "Percentage of Simulation Conditions Meeting Prediction and "
-        "Parameter-Recovery Criteria\nby Mean Event Yield, Person-Behavior "
-        "Phenotype, and Social-Environment Consequence Profile",
-        fontsize=12,
-    )
     figure.savefig(output.with_suffix(".png"), dpi=300, bbox_inches="tight")
     figure.savefig(output.with_suffix(".pdf"), bbox_inches="tight")
     plt.close(figure)
@@ -1104,7 +915,7 @@ def _plot_information_model_comparison(
         frameon=False,
     )
     figure.supxlabel(
-        "Information condition (participants / mean events / missingness)",
+        "Information design (participants / mean events / missingness)",
         y=0.01,
     )
     figure.tight_layout(rect=(0.0, 0.05, 1.0, 0.91), h_pad=2.0)
@@ -1143,8 +954,8 @@ def _plot_missingness(missingness: pd.DataFrame, output: Path) -> None:
     class_specs = (
         ("decision_weight", "Decision weights"),
         ("learning_rate", "Learning rates"),
-        ("social_influence", "Social influence"),
-        ("choice_consistency", "Choice consistency"),
+        ("social_integration", "Social-influence weights"),
+        ("choice_consistency", "Effective choice consistency"),
     )
     for axis, (column, title) in zip(axes.flat[1:], class_specs):
         axis.plot(
@@ -1156,7 +967,7 @@ def _plot_missingness(missingness: pd.DataFrame, output: Path) -> None:
         axis.axhline(0.0, color="black", linewidth=0.8)
         axis.set(
             xlabel="Event-level missingness (%)",
-            ylabel="Change in scale-adjusted error",
+            ylabel="Change in parameter error",
             title=title,
             xticks=[10, 20],
         )
@@ -1169,7 +980,7 @@ def _plot_missingness(missingness: pd.DataFrame, output: Path) -> None:
     )
     axes[0, 0].legend(frameon=False, fontsize=8)
     axes[1, 2].axis("off")
-    figure.suptitle("Consequences of an Incomplete Observed Learning History")
+    figure.suptitle("Consequences of an Incomplete Reported Learning History")
     figure.savefig(output.with_suffix(".png"), dpi=300, bbox_inches="tight")
     figure.savefig(output.with_suffix(".pdf"), bbox_inches="tight")
     plt.close(figure)
@@ -1219,9 +1030,9 @@ def _plot_model_recovery(rates: pd.DataFrame, output: Path) -> None:
         axis.set_title(PROFILE_LABELS[profile], fontstyle="italic")
         axis.axhline(0.5, color="black", linewidth=0.6, linestyle="--")
     scenario_labels = {
-        "low": "Sparse",
-        "middle": "Intermediate",
-        "high": "Dense",
+        "low": "Low information",
+        "middle": "Intermediate information",
+        "high": "High information",
     }
     axes[-1].set_xticks(
         positions,
@@ -1293,13 +1104,14 @@ def _legacy_interpretation_report(
 - Failed or missing model rows: {audit["failed_or_missing_model_rows"]}.
 - Recorded model-fit CPU time: {fit_status["recorded_model_fit_runtime_seconds"] / 3600:.1f} hours.
 
-## Finding 1: Population-Average Parameter Recovery Is an Interpretive Prerequisite
+## Finding 1: Shared-Parameter Accuracy Constrains Interpretation
 
-Population-average recovery was evaluated independently of prediction. None
-of the phenotype x environment x missingness cells met the recovery criterion
+Shared-parameter accuracy was evaluated independently of prediction by
+comparing fitted shared estimates with mean generating parameters. None of the
+phenotype x environment x missingness cells met the accuracy criterion
 at N = 30, including the 50-event condition. At N = 60 with 50 mean events,
 {100 * middle_dense["population_recovery_rate"]:.1f}% met the criterion. At
-N = 100 with 50 mean events, recovery was adequate in
+N = 100 with 50 mean events, accuracy was adequate in
 {100 * generous_complete["population_recovery_rate"]:.1f}% of complete-history
 conditions, {100 * generous_missing_10["population_recovery_rate"]:.1f}% with
 10% event-level missingness, and
@@ -1309,8 +1121,9 @@ missingness.
 Mean population-center absolute bias declined from
 {sparse["mean_population_center_abs_bias"]:.3f} at N = 30 with 10 mean events
 to {generous["mean_population_center_abs_bias"]:.3f} at N = 100 with 50 mean
-events. Recovery is necessary before fitted parameters are interpreted as
-population learning processes, but it is not itself a substantive study goal.
+events. Because the generator allowed individual heterogeneity while the
+estimator imposed one shared vector, this comparison reflects both parameter
+recoverability and approximation error.
 
 ## Finding 2: Prediction Adequacy Depends Primarily on Sampling Information
 
@@ -1323,10 +1136,11 @@ and N = 100 with 50 events were adequate in
 {100 * middle_dense["prediction_adequate_rate"]:.1f}% and
 {100 * generous["prediction_adequate_rate"]:.1f}% of cells, respectively.
 
-Designs that predict held-out behavior adequately can still recover the
-population parameters poorly. Prediction and recovery should therefore be
-reported separately and combined only when discussing whether a fitted
-population parameter is potentially interpretable.
+Designs that predict held-out behavior adequately can still show weak
+shared-parameter accuracy. Prediction and shared-parameter accuracy should
+therefore be reported separately and
+combined only when discussing whether a fitted shared parameter is potentially
+interpretable.
 
 ## Finding 3: Learning Versus No Learning Is a Candidate-Model Comparison
 
@@ -1380,16 +1194,16 @@ support treating additional computational detail as automatically beneficial.
 ## Finding 6: Social Environment Changes Informativeness
 
 The mean tripartite log loss was
-{environment_index.loc["escalation_prone", "mean_log_loss"]:.3f} in
-Escalation-Prone environments,
-{environment_index.loc["repair_supportive", "mean_log_loss"]:.3f} in
-Repair-Supportive environments, and
-{environment_index.loc["inconsistent_ambiguous", "mean_log_loss"]:.3f} in
-Inconsistent/Ambiguous environments. The ambiguous environment also produced
+{environment_index.loc["avoidance_oriented", "mean_log_loss"]:.3f} in
+avoidance-oriented environments,
+{environment_index.loc["approach_oriented", "mean_log_loss"]:.3f} in
+approach-oriented environments, and
+{environment_index.loc["mixed", "mean_log_loss"]:.3f} in
+mixed environments. The mixed environment also produced
 the smallest average tripartite advantage over no learning
-({environment_index.loc["inconsistent_ambiguous", "tripartite_improvement_over_no_learning_mean_mean"]:.3f}).
+({environment_index.loc["mixed", "tripartite_improvement_over_no_learning_mean_mean"]:.3f}).
 The same AA design can therefore be more or less informative depending on the
-consequence ecology in which behavior occurs.
+social environment in which behavior occurs.
 
 ## Finding 7: Model Recovery Places a Strong Boundary on Mechanistic Claims
 
@@ -1422,10 +1236,9 @@ interpretation when candidate models make nearly equivalent predictions.
 
 1. These are model- and generator-specific design results, not universal AA
    sample-size recommendations.
-2. Population-average parameter recovery is an interpretive prerequisite,
-   prediction is a substantive performance criterion, and candidate-model
-   comparisons test particular process assumptions. They must be reported
-   separately.
+2. Shared-parameter accuracy constrains interpretation, prediction is a
+   substantive performance criterion, and candidate-model comparisons test
+   particular process assumptions. They must be reported separately.
 3. Person-specific learning rates are not production estimands because the
    preproduction recovery ladder did not support their interpretation.
 4. Synthetic recovery supports feasibility under stated assumptions, not
@@ -1494,40 +1307,44 @@ def _interpretation_report(
 
 ## Prediction
 
-The manuscript-facing prediction benchmark requires a mean relative log-loss
+The manuscript-facing prediction criterion requires a mean relative log-loss
 improvement of at least 5% over the base-rate model, the same minimum in at
 least 80% of replicates, mean expected calibration error no larger than .10,
 expected calibration error no larger than .15 in at least 80% of replicates,
-and finite converged results. The benchmark was met in
+and finite converged results. The criterion was met in
 {100 * sparse["predictive_signal_rate"]:.1f}% of conditions at N = 30 with 10
 mean events, {100 * dense_within_person["predictive_signal_rate"]:.1f}% at N =
 30 with 50 events, and {100 * intermediate["predictive_signal_rate"]:.1f}% at
 N = 60 with 25 events. Continuous skill and calibration should accompany all
 thresholded summaries.
 
-## Population-Average Parameter Recovery
+## Shared-Parameter Accuracy
 
-Recovery is evaluated separately for decision weights, learning rates, social
-influence, and effective choice consistency. Errors for parameters bounded
-from 0 to 1 are expressed on that unit scale, social-influence error is divided
-by its 0-to-2 range, and choice-consistency error is an absolute log ratio.
+Shared estimates are compared with mean generating parameters separately for
+decision weights, learning rates, social-influence weights, and effective
+choice consistency. Errors for
+decision, learning, suggestion-integration, and feedback-integration
+parameters are expressed on their 0-to-1 unit scale, and
+effective-choice-consistency error is an absolute log ratio.
 A class must meet its scale-specific threshold on average and in at least 80%
-of replicates. The full vector passes only if all four classes pass, so strong
-recovery of one class cannot offset poor recovery of another.
+of replicates. The full vector passes only if all four classes pass, so high
+accuracy in one class cannot offset low accuracy in another.
 
 Across all 405 factorial conditions, decision weights met their criterion in
 {100 * grid["decision_weight_recovery_rate"].mean():.1f}%, learning rates in
-{100 * grid["learning_rate_recovery_rate"].mean():.1f}%, social influence in
-{100 * grid["social_influence_recovery_rate"].mean():.1f}%, and choice
+{100 * grid["learning_rate_recovery_rate"].mean():.1f}%, social-influence weights in
+{100 * grid["social_integration_recovery_rate"].mean():.1f}%, and choice
 consistency in {100 * grid["choice_consistency_recovery_rate"].mean():.1f}%.
-No condition recovered all four parameter classes. Even at N = 100 with 50
+No condition met the accuracy criteria for all four parameter classes. Even
+at N = 100 with 50
 mean events, the pooled class pass rates were
 {100 * generous["decision_weight_recovery_rate"]:.1f}% for decision weights,
 {100 * generous["learning_rate_recovery_rate"]:.1f}% for learning rates,
-{100 * generous["social_influence_recovery_rate"]:.1f}% for social influence,
-and {100 * generous["choice_consistency_recovery_rate"]:.1f}% for choice
-consistency. Population parameters should therefore not be treated as jointly
-recovered in this demonstration.
+{100 * generous["social_integration_recovery_rate"]:.1f}% for social-influence
+weights, and {100 * generous["choice_consistency_recovery_rate"]:.1f}% for
+effective choice consistency. The shared estimates should therefore not be
+treated as jointly approximating the mean generating parameters in this
+demonstration.
 
 ## Missingness
 
@@ -1538,33 +1355,33 @@ aggregate population absolute-error summary by
 Masking 20% increased them by
 {missing_tripartite.loc[20, "mean_log_loss_change"]:.3f} and
 {missing_tripartite.loc[20, "mean_population_bias_change"]:.3f}. Parameter-class
-errors are the primary recovery summaries; this aggregate is retained only for
+errors are the primary accuracy summaries; this aggregate is retained only for
 the paired missingness comparison with the frozen production output.
 
 ## Reporting Boundaries
 
-1. The prediction benchmark is a minimum signal-and-calibration screen, not a
+1. The prediction criterion is a minimum signal-and-calibration screen, not a
    universal definition of adequate prediction.
-2. Parameter recovery is class specific. No population parameter should be
+2. Shared-parameter accuracy is class specific. No shared parameter should be
    interpreted solely because the former across-parameter mean error was small.
 3. Threshold sensitivity and continuous metrics accompany binary pass rates.
 4. Person-specific learning rates are not production estimands.
 5. Candidate-model comparisons test process assumptions separately from
-   prediction and parameter recovery.
+   prediction and shared-parameter accuracy.
 
 ## Output Map
 
 - `manuscript_tripartite_design_grid.csv`: prediction and parameter-class
-  recovery by sample size, event yield, and missingness.
+  accuracy by sample size, event yield, and missingness.
 - `supplement_prediction_recovery_by_condition.csv`: all 405 factorial cells.
-- `supplement_prediction_threshold_sensitivity.csv`: prediction benchmark
+- `supplement_prediction_threshold_sensitivity.csv`: prediction-criterion
   sensitivity.
-- `supplement_recovery_threshold_sensitivity.csv`: parameter-class recovery
+- `supplement_recovery_threshold_sensitivity.csv`: parameter-class accuracy
   sensitivity.
 - `manuscript_model_comparison_by_profile.csv`: phenotype heterogeneity.
 - `manuscript_phenotype_environment_by_events.csv`: prediction and
-  parameter-recovery criteria by event yield, phenotype, and
-  social-environment consequence profile.
+  shared-parameter accuracy criteria by event yield, phenotype, and
+  social-environment profile.
 - `manuscript_model_performance_by_information.csv`: prediction across the
   low-, intermediate-, and high-information designs.
 - `manuscript_model_comparison_by_environment.csv`: contextual heterogeneity.

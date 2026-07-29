@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import argparse
+from itertools import product
 import json
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Dict
 
 import numpy as np
 import pandas as pd
 
 from pdtrt_rerun_core import atomic_write_csv, atomic_write_json
+from pdtrt_adequacy import (
+    AdequacyThresholds,
+    cell_diagnostics,
+    expected_recovery_count,
+)
 
 
 DESIGN_KEYS = [
@@ -122,153 +128,38 @@ def _comparison_summaries(
 
 
 def _design_adequacy(
+    outdir: Path,
     summary: pd.DataFrame,
-    comparisons: pd.DataFrame,
     manifest: Dict[str, object],
-) -> pd.DataFrame:
-    thresholds = manifest["adequacy_thresholds"]
+    *,
+    require_complete: bool,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    thresholds = AdequacyThresholds.from_manifest(manifest)
     expected_replicates = int(manifest["design"]["replicates"])
-    comparison_columns = [
-        *REPLICATE_KEYS,
-        "tripartite_improvement_over_no_learning",
-    ]
-    merged = summary.merge(
-        comparisons[comparison_columns],
-        on=REPLICATE_KEYS,
-        how="left",
-        validate="many_to_one",
+    cells, recovery_replicates = cell_diagnostics(
+        outdir,
+        summary,
+        expected_replicates=expected_replicates,
+        expected_recovery_files=(
+            expected_recovery_count(manifest["design"])
+            if require_complete
+            else None
+        ),
+        thresholds=thresholds,
     )
-    null_loss = summary.loc[
-        summary["model"] == "prevalence_null",
-        [*REPLICATE_KEYS, "metric_log_loss"],
-    ].rename(columns={"metric_log_loss": "null_log_loss"})
-    merged = merged.merge(
-        null_loss,
-        on=REPLICATE_KEYS,
-        how="left",
-        validate="many_to_one",
+    cells["model"] = "tripartite"
+    cells["adequate_prediction"] = cells[
+        "minimum_predictive_signal"
+    ].astype(bool)
+    cells["population_recovery_target_matches_generator"] = (
+        manifest["design"]["generator_model"] == "tripartite"
     )
-    merged["improvement_over_prevalence"] = (
-        merged["null_log_loss"] - merged["metric_log_loss"]
+    cells["adequate_population_interpretation"] = (
+        cells["adequate_prediction"]
+        & cells["population_recovery_target_matches_generator"]
+        & cells["full_vector_recovery"]
     )
-
-    rows: List[Dict[str, object]] = []
-    for keys, group in merged.groupby(
-        [*DESIGN_KEYS, "model"],
-        dropna=False,
-    ):
-        row = dict(zip([*DESIGN_KEYS, "model"], keys))
-        finite = np.isfinite(group["metric_log_loss"].to_numpy(dtype=float))
-        optimizer = group[
-            "diagnostic_optimizer_success_rate"
-        ].to_numpy(dtype=float)
-        improvement = group[
-            "improvement_over_prevalence"
-        ].to_numpy(dtype=float)
-        population_bias = group[
-            "population_mean_abs_bias"
-        ].to_numpy(dtype=float)
-        trip_gain = group[
-            "tripartite_improvement_over_no_learning"
-        ].to_numpy(dtype=float)
-
-        row["replicate_count"] = len(group)
-        row["complete_replicates"] = len(group) == expected_replicates
-        row["finite_log_loss_fraction"] = float(np.mean(finite))
-        row["optimizer_pass_fraction"] = float(
-            np.mean(
-                optimizer
-                >= thresholds["optimizer_success_rate_minimum"]
-            )
-        )
-        row["mean_log_loss"] = float(
-            np.mean(group["metric_log_loss"])
-        )
-        row["mean_improvement_over_prevalence"] = float(
-            np.mean(improvement)
-        )
-        row["prevalence_improvement_pass_fraction"] = float(
-            np.mean(
-                improvement
-                >= thresholds[
-                    "model_log_loss_improvement_over_prevalence_minimum"
-                ]
-            )
-        )
-        if np.any(np.isfinite(population_bias)):
-            finite_bias = population_bias[np.isfinite(population_bias)]
-            row["mean_population_center_abs_bias"] = float(
-                np.mean(finite_bias)
-            )
-            row["population_bias_pass_fraction"] = float(
-                np.mean(
-                    finite_bias
-                    <= thresholds[
-                        "population_center_mean_absolute_bias_maximum"
-                    ]
-                )
-            )
-        else:
-            row["mean_population_center_abs_bias"] = np.nan
-            row["population_bias_pass_fraction"] = np.nan
-
-        minimum_fraction = thresholds[
-            "replicate_pass_fraction_minimum"
-        ]
-        row["adequate_prediction"] = bool(
-            row["complete_replicates"]
-            and row["finite_log_loss_fraction"] >= minimum_fraction
-            and row["optimizer_pass_fraction"] >= minimum_fraction
-            and row["mean_improvement_over_prevalence"]
-            >= thresholds[
-                "model_log_loss_improvement_over_prevalence_minimum"
-            ]
-            and row["prevalence_improvement_pass_fraction"]
-            >= minimum_fraction
-        )
-        row["population_recovery_target_matches_generator"] = bool(
-            row["model"] == manifest["design"]["generator_model"]
-        )
-        row["adequate_population_interpretation"] = bool(
-            row["adequate_prediction"]
-            and row["population_recovery_target_matches_generator"]
-            and np.isfinite(row["mean_population_center_abs_bias"])
-            and row["mean_population_center_abs_bias"]
-            <= thresholds[
-                "population_center_mean_absolute_bias_maximum"
-            ]
-            and row["population_bias_pass_fraction"]
-            >= minimum_fraction
-        )
-        if row["model"] == "tripartite":
-            row["mean_tripartite_improvement_over_no_learning"] = float(
-                np.mean(trip_gain)
-            )
-            row["tripartite_learning_gain_pass_fraction"] = float(
-                np.mean(
-                    trip_gain
-                    >= thresholds[
-                        "tripartite_log_loss_improvement_over_no_learning_minimum"
-                    ]
-                )
-            )
-            row["adequate_learning_process_distinction"] = bool(
-                row["adequate_prediction"]
-                and row[
-                    "mean_tripartite_improvement_over_no_learning"
-                ]
-                >= thresholds[
-                    "tripartite_log_loss_improvement_over_no_learning_minimum"
-                ]
-                and row["tripartite_learning_gain_pass_fraction"]
-                >= minimum_fraction
-            )
-        else:
-            row["mean_tripartite_improvement_over_no_learning"] = np.nan
-            row["tripartite_learning_gain_pass_fraction"] = np.nan
-            row["adequate_learning_process_distinction"] = False
-        rows.append(row)
-    return pd.DataFrame(rows)
+    return cells, recovery_replicates
 
 
 def _design_frontiers(
@@ -426,7 +317,7 @@ def _write_report(
 ## Adequacy
 
 - Design-model cells adequate for held-out prediction: {prediction_count}
-- Design-model cells adequate for population-parameter interpretation: {interpretation_count}
+- Design-model cells meeting the shared-parameter accuracy criterion: {interpretation_count}
 - Design-priority recommendations produced: {len(priority_recommendations)}
 
 Person-specific learning parameters are not treated as production estimands.
@@ -442,6 +333,7 @@ or total expected observations.
 - `paired_model_comparisons.csv`
 - `paired_model_comparison_summary.csv`
 - `design_adequacy.csv`
+- `population_recovery_replicates.csv`
 - `design_pareto_frontier.csv`
 - `least_burdensome_adequate_designs.csv`
 - `design_priority_recommendations.csv`
@@ -470,12 +362,48 @@ def run(args: argparse.Namespace) -> int:
     expected_models = len(design["candidate_models"]) + 1
     expected_rows = expected_datasets * expected_models
     observed_rows = len(summary)
-    observed_datasets = len(
-        summary[REPLICATE_KEYS].drop_duplicates()
+    expected_model_names = {
+        *design["candidate_models"],
+        "prevalence_null",
+    }
+    expected_keys = pd.MultiIndex.from_tuples(
+        product(
+            design["profiles"],
+            design["environments"],
+            [float(value) for value in design["mean_events"]],
+            [int(value) for value in design["sample_sizes"]],
+            [float(value) for value in design["missing_rates"]],
+            range(1, int(design["replicates"]) + 1),
+            sorted(expected_model_names),
+        ),
+        names=[*REPLICATE_KEYS, "model"],
     )
+    observed_key_frame = summary[[*REPLICATE_KEYS, "model"]].copy()
+    observed_key_frame["mean_events"] = observed_key_frame[
+        "mean_events"
+    ].astype(float)
+    observed_key_frame["sample_size"] = observed_key_frame[
+        "sample_size"
+    ].astype(int)
+    observed_key_frame["missing_rate"] = observed_key_frame[
+        "missing_rate"
+    ].astype(float)
+    observed_key_frame["replicate"] = observed_key_frame[
+        "replicate"
+    ].astype(int)
+    duplicate_key_count = int(observed_key_frame.duplicated().sum())
+    observed_keys = pd.MultiIndex.from_frame(
+        observed_key_frame.drop_duplicates()
+    )
+    missing_key_count = len(expected_keys.difference(observed_keys))
+    unexpected_key_count = len(observed_keys.difference(expected_keys))
+    observed_datasets = len(summary[REPLICATE_KEYS].drop_duplicates())
     complete = (
         observed_rows == expected_rows
         and observed_datasets == expected_datasets
+        and duplicate_key_count == 0
+        and missing_key_count == 0
+        and unexpected_key_count == 0
     )
     if not complete and not args.allow_incomplete:
         raise ValueError(
@@ -486,7 +414,12 @@ def run(args: argparse.Namespace) -> int:
     cells = _cell_summaries(summary)
     comparisons = _paired_model_comparisons(summary)
     comparison_summary = _comparison_summaries(comparisons)
-    adequacy = _design_adequacy(summary, comparisons, manifest)
+    adequacy, recovery_replicates = _design_adequacy(
+        outdir,
+        summary,
+        manifest,
+        require_complete=complete,
+    )
     (
         frontier,
         recruitment_first,
@@ -504,6 +437,10 @@ def run(args: argparse.Namespace) -> int:
         outdir / "paired_model_comparison_summary.csv",
     )
     atomic_write_csv(adequacy, outdir / "design_adequacy.csv")
+    atomic_write_csv(
+        recovery_replicates,
+        outdir / "population_recovery_replicates.csv",
+    )
     atomic_write_csv(frontier, outdir / "design_pareto_frontier.csv")
     atomic_write_csv(
         recruitment_first,
@@ -518,13 +455,14 @@ def run(args: argparse.Namespace) -> int:
         outdir / "paired_missingness_contrasts.csv",
     )
 
+    thresholds = AdequacyThresholds.from_manifest(manifest)
     failed_rows = int(
-        (~np.isfinite(summary["metric_log_loss"])).sum()
-        + (
-            summary["diagnostic_optimizer_success_rate"]
-            < manifest["adequacy_thresholds"][
-                "optimizer_success_rate_minimum"
-            ]
+        (
+            ~np.isfinite(summary["metric_log_loss"])
+            | (
+                summary["diagnostic_optimizer_success_rate"]
+                < thresholds.optimizer_success_rate_minimum
+            )
         ).sum()
     )
     audit = {
@@ -535,6 +473,9 @@ def run(args: argparse.Namespace) -> int:
         "observed_dataset_count": observed_datasets,
         "expected_dataset_count": expected_datasets,
         "observed_inventory_rows": len(inventory),
+        "duplicate_analysis_key_count": duplicate_key_count,
+        "missing_analysis_key_count": missing_key_count,
+        "unexpected_analysis_key_count": unexpected_key_count,
         "failed_or_missing_model_rows": failed_rows,
         "models": sorted(summary["model"].unique().tolist()),
         "replicates": sorted(
@@ -561,7 +502,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(
             Path(__file__).resolve().parents[1]
             / "config"
-            / "pdtrt_production_v1.json"
+            / "pdtrt_production_v2.json"
         ),
     )
     parser.add_argument("--allow-incomplete", action="store_true")
